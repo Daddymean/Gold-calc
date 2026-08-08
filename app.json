@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "BullionBook",
+    "slug": "bullionbook",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "bullionbook",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0D12"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bullionbook.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "BullionBook uses the camera to photograph items you take in, so every purchase has a visual record.",
+        "NSPhotoLibraryUsageDescription": "BullionBook needs photo access to attach existing pictures of items to an inventory record."
+      }
+    },
+    "android": {
+      "package": "com.bullionbook.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0D12"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Attach a photo of the item to its inventory record.",
+          "cameraPermission": "Photograph items at the counter as you take them in."
+        }
+      ],
+      "expo-asset",
+      "expo-font"
+    ],
+    "extra": {
+      "router": {},
+      "spotProvider": "demo",
+      "spotApiKey": ""
+    }
+  }
+}

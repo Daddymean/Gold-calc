@@ -1,0 +1,291 @@
+import React, { useState } from 'react';
+import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useApp, useSpot } from '@/state/AppState';
+import { PROVIDERS, type ProviderId } from '@/lib/spot';
+import { CURRENCIES, parseNumber } from '@/lib/format';
+import { METALS, METAL_ORDER, WEIGHT_UNITS, WEIGHT_UNIT_ORDER } from '@/lib/metals';
+import { customersCsv, inventoryCsv, shareCsv } from '@/lib/export';
+import { Button, Card, Divider, Input, SectionLabel, Segmented } from '@/components/ui';
+import { colors, spacing, type } from '@/theme';
+
+const PROVIDER_DOCS: Record<ProviderId, string> = {
+  demo: '',
+  'metals.dev': 'https://metals.dev',
+  goldapi: 'https://www.goldapi.io',
+};
+
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const { settings, updateSettings, items, customers, resetAll, refreshQuotes, refreshing } = useApp();
+  const spot = useSpot();
+
+  const [keyDraft, setKeyDraft] = useState(settings.spotApiKey);
+  const [businessDraft, setBusinessDraft] = useState(settings.businessName);
+  const [payoutDraft, setPayoutDraft] = useState(String(Math.round(settings.defaultPayoutRate * 100)));
+  const [holdDraft, setHoldDraft] = useState(String(settings.holdPeriodDays));
+  const [exporting, setExporting] = useState(false);
+
+  const provider = PROVIDERS[settings.spotProvider as ProviderId];
+
+  const doExport = async (which: 'inventory' | 'customers') => {
+    if (which === 'inventory' && !items.length) {
+      Alert.alert('Nothing to export', 'Your inventory is empty.');
+      return;
+    }
+    if (which === 'customers' && !customers.length) {
+      Alert.alert('Nothing to export', 'You have no customer records.');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (which === 'inventory') {
+        await shareCsv(`inventory-${stamp}.csv`, inventoryCsv(items, spot));
+      } else {
+        await shareCsv(`customers-${stamp}.csv`, customersCsv(customers, items));
+      }
+    } catch (err: any) {
+      Alert.alert('Export failed', err?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const confirmReset = () => {
+    Alert.alert(
+      'Erase everything?',
+      `This deletes ${items.length} item${items.length === 1 ? '' : 's'} and ${customers.length} customer record${customers.length === 1 ? '' : 's'} from this device. Export first if you want a copy — this cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Erase everything', style: 'destructive', onPress: () => resetAll() },
+      ],
+    );
+  };
+
+  return (
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
+    >
+      {/* ------------------------------------------------------ price feed */}
+      <View style={styles.section}>
+        <SectionLabel>Price feed</SectionLabel>
+        <Segmented
+          scroll
+          value={settings.spotProvider}
+          onChange={(id) => updateSettings({ spotProvider: id as ProviderId })}
+          options={Object.values(PROVIDERS).map((p) => ({ value: p.id, label: p.label }))}
+        />
+
+        <Card style={{ marginTop: spacing.md }}>
+          {settings.spotProvider === 'demo' ? (
+            <Text style={styles.note}>
+              Demo prices are generated on this device so the app works with no key and no signal.
+              They are realistic but <Text style={styles.strong}>not market data</Text> — switch to a
+              real feed before paying anyone against them.
+            </Text>
+          ) : (
+            <>
+              <Input
+                label={`${provider.label} API key`}
+                value={keyDraft}
+                onChangeText={setKeyDraft}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                placeholder="Paste your key"
+              />
+              <View style={styles.keyActions}>
+                <Button
+                  label="Save key"
+                  variant="secondary"
+                  onPress={() => {
+                    updateSettings({ spotApiKey: keyDraft.trim() });
+                    refreshQuotes(true);
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  label="Get a key"
+                  variant="ghost"
+                  onPress={() => Linking.openURL(PROVIDER_DOCS[settings.spotProvider as ProviderId])}
+                  style={{ flex: 1 }}
+                />
+              </View>
+              {!provider.supportsHistory && (
+                <Text style={styles.note}>
+                  {provider.label} doesn't serve history on the free tier, so trend charts fall back
+                  to demo data. Prices stay live.
+                </Text>
+              )}
+            </>
+          )}
+
+          <Divider />
+          <Input
+            label="Refresh every"
+            value={String(settings.refreshMinutes)}
+            onChangeText={(t) =>
+              updateSettings({ refreshMinutes: Math.max(1, Math.round(parseNumber(t))) || 15 })
+            }
+            keyboardType="number-pad"
+            suffix="min"
+            hint="Lower means fresher prices and more API calls."
+          />
+          <Button
+            label="Refresh now"
+            variant="secondary"
+            loading={refreshing}
+            onPress={() => refreshQuotes(true)}
+            style={{ marginTop: spacing.md }}
+          />
+        </Card>
+      </View>
+
+      {/* -------------------------------------------------------- defaults */}
+      <View style={styles.section}>
+        <SectionLabel>Counter defaults</SectionLabel>
+        <Card>
+          <Text style={styles.label}>Currency</Text>
+          <Segmented
+            scroll
+            value={settings.currency}
+            onChange={(code) => updateSettings({ currency: code })}
+            options={CURRENCIES.map((c) => ({ value: c.code, label: c.code }))}
+          />
+
+          <View style={{ height: spacing.lg }} />
+          <Text style={styles.label}>Default metal</Text>
+          <Segmented
+            value={settings.defaultMetal}
+            onChange={(m) => updateSettings({ defaultMetal: m })}
+            options={METAL_ORDER.map((m) => ({ value: m, label: METALS[m].name }))}
+          />
+
+          <View style={{ height: spacing.lg }} />
+          <Text style={styles.label}>Default weight unit</Text>
+          <Segmented
+            scroll
+            value={settings.defaultUnit}
+            onChange={(u) => updateSettings({ defaultUnit: u })}
+            options={WEIGHT_UNIT_ORDER.map((u) => ({ value: u, label: WEIGHT_UNITS[u].label }))}
+          />
+
+          <Divider />
+          <Input
+            label="Default payout rate"
+            value={payoutDraft}
+            onChangeText={setPayoutDraft}
+            onBlur={() => {
+              const pct = Math.min(100, Math.max(0, parseNumber(payoutDraft)));
+              setPayoutDraft(String(Math.round(pct)));
+              updateSettings({ defaultPayoutRate: pct / 100 });
+            }}
+            keyboardType="number-pad"
+            suffix="%"
+            hint="What the calculator opens at. Scrap buyers typically run 70–90%."
+          />
+        </Card>
+      </View>
+
+      {/* ------------------------------------------------------ compliance */}
+      <View style={styles.section}>
+        <SectionLabel>Records &amp; compliance</SectionLabel>
+        <Card>
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchLabel}>Require seller ID on purchases</Text>
+              <Text style={styles.switchHint}>
+                Blocks saving a purchase without a name and ID number.
+              </Text>
+            </View>
+            <Switch
+              value={settings.requireCustomerId}
+              onValueChange={(v) => updateSettings({ requireCustomerId: v })}
+              trackColor={{ true: colors.goldDim, false: colors.border }}
+              thumbColor={settings.requireCustomerId ? colors.gold : colors.textFaint}
+            />
+          </View>
+
+          <Divider />
+
+          <Input
+            label="Hold period before melting"
+            value={holdDraft}
+            onChangeText={setHoldDraft}
+            onBlur={() => {
+              const days = Math.max(0, Math.round(parseNumber(holdDraft)));
+              setHoldDraft(String(days));
+              updateSettings({ holdPeriodDays: days });
+            }}
+            keyboardType="number-pad"
+            suffix="days"
+            hint="Many jurisdictions require holding bought goods before resale or melting. 0 turns the reminder off."
+          />
+
+          <View style={{ height: spacing.md }} />
+          <Input
+            label="Business name"
+            value={businessDraft}
+            onChangeText={setBusinessDraft}
+            onBlur={() => updateSettings({ businessName: businessDraft.trim() })}
+            placeholder="Appears on exports"
+          />
+
+          <Text style={styles.note}>
+            These settings are reminders, not legal advice. Secondhand-dealer and precious-metal
+            rules vary by state, province and city — confirm what applies to you.
+          </Text>
+        </Card>
+      </View>
+
+      {/* ---------------------------------------------------------- export */}
+      <View style={styles.section}>
+        <SectionLabel>Your data</SectionLabel>
+        <Card>
+          <Text style={styles.note}>
+            Everything lives on this device — inventory, customers, photos and ID details. Nothing is
+            uploaded. That also means a lost phone is a lost book, so export regularly.
+          </Text>
+          <View style={{ height: spacing.md }} />
+          <Button
+            label={`Export inventory (${items.length})`}
+            variant="secondary"
+            loading={exporting}
+            onPress={() => doExport('inventory')}
+          />
+          <View style={{ height: spacing.sm }} />
+          <Button
+            label={`Export customers (${customers.length})`}
+            variant="secondary"
+            loading={exporting}
+            onPress={() => doExport('customers')}
+          />
+          <View style={{ height: spacing.lg }} />
+          <Button label="Erase all data" variant="danger" onPress={confirmReset} />
+        </Card>
+      </View>
+
+      <Text style={styles.version}>BullionBook · prices are indicative, not an offer to trade.</Text>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.bg },
+  section: { paddingHorizontal: spacing.lg },
+
+  label: { ...type.label, color: colors.textMuted, marginBottom: spacing.sm },
+  note: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: spacing.md },
+  strong: { color: colors.warn, fontWeight: '700' },
+
+  keyActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  switchLabel: { ...type.body, color: colors.text, fontWeight: '600' },
+  switchHint: { ...type.caption, color: colors.textFaint, marginTop: 1 },
+
+  version: { ...type.caption, color: colors.textFaint, textAlign: 'center', marginTop: spacing.xl },
+});
