@@ -32,20 +32,28 @@ import { uid } from '@/lib/storage';
 export default function CalculatorScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { settings, quotes } = useApp();
+  const { settings, rateFor } = useApp();
   const spot = useSpot();
 
   const [metal, setMetal] = useState<MetalSymbol>(settings.defaultMetal);
   const [purityId, setPurityId] = useState<string>(DEFAULT_PURITY[settings.defaultMetal]);
   const [unit, setUnit] = useState<WeightUnit>(settings.defaultUnit);
   const [weightText, setWeightText] = useState('');
-  const [payoutText, setPayoutText] = useState(String(Math.round(settings.defaultPayoutRate * 100)));
+  const [payoutOverride, setPayoutOverride] = useState<string | null>(null);
   const [offerText, setOfferText] = useState('');
   const [offerLocked, setOfferLocked] = useState(false);
   const [lot, setLot] = useState<LotLine[]>([]);
 
   const purity = findPurity(purityId);
   const spotPrice = spot[metal] ?? 0;
+
+  // The table sets the rate as metal, karat and weight change; typing in the
+  // percentage field pins it until the operator clears the override.
+  const tableRate = useMemo(
+    () => rateFor({ metal, purityId, weight: parseNumber(weightText), unit }),
+    [rateFor, metal, purityId, weightText, unit],
+  );
+  const payoutText = payoutOverride ?? String(Math.round(tableRate.rate * 100));
   const payoutRate = parseNumber(payoutText) / 100;
 
   const result = useMemo(
@@ -176,7 +184,7 @@ export default function CalculatorScreen() {
               label="Payout rate"
               value={payoutText}
               onChangeText={(t) => {
-                setPayoutText(t);
+                setPayoutOverride(t);
                 setOfferLocked(false);
               }}
               keyboardType="number-pad"
@@ -197,7 +205,7 @@ export default function CalculatorScreen() {
               accessibilityLabel="Fixed offer amount"
             />
           </View>
-          {offerLocked && (
+          {offerLocked ? (
             <Text style={styles.offerNote}>
               That offer is {percent(effectiveRate)} of melt.{' '}
               <Text
@@ -210,6 +218,19 @@ export default function CalculatorScreen() {
                 Back to percentage
               </Text>
             </Text>
+          ) : payoutOverride !== null ? (
+            <Text style={styles.offerNote}>
+              Manual rate.{' '}
+              <Text style={styles.link} onPress={() => setPayoutOverride(null)}>
+                Use the buy table
+              </Text>
+            </Text>
+          ) : (
+            settings.useBuyTable && (
+              <Text style={styles.offerNote}>
+                {tableRate.rule ? `Buy table · ${tableRate.reason}` : tableRate.reason}
+              </Text>
+            )
           )}
         </View>
 

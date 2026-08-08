@@ -4,6 +4,7 @@ import type { CurrencyCode } from '@/lib/format';
 // Re-exported so consumers can pull the whole vocabulary from one module.
 export type { MetalSymbol, WeightUnit } from '@/lib/metals';
 export type { CurrencyCode } from '@/lib/format';
+export type { BuyRule } from '@/lib/buyTable';
 
 /** How the item came through the door. Drives compliance prompts and reporting. */
 export type TransactionType = 'purchase' | 'consignment' | 'trade' | 'sale';
@@ -91,6 +92,17 @@ export interface Settings {
   spotApiKey: string;
   /** Minutes between automatic spot refreshes. */
   refreshMinutes: number;
+
+  /** Let the buy table pick the payout rate instead of the flat default. */
+  useBuyTable: boolean;
+  /** Require device authentication before the book opens. */
+  appLockEnabled: boolean;
+  /**
+   * Delete stored ID photos this many days after capture. 0 keeps them
+   * indefinitely. Holding a customer's ID image longer than your rules require
+   * is a liability, so this exists to make forgetting automatic.
+   */
+  idPhotoRetentionDays: number;
 }
 
 export interface SpotQuote {

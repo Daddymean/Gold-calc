@@ -22,7 +22,7 @@ Scan the QR code with **Expo Go** on your phone, or press `i` / `a` for a
 simulator. `npm run web` opens it in a browser (camera capture is limited there).
 
 ```bash
-npm test        # the money math — 17 tests, no native deps needed
+npm test        # money math, buy table, crypto, retention — 54 tests, no native deps
 npm run typecheck
 ```
 
@@ -41,6 +41,10 @@ path of that sequence.
   see on the piece
 - Six weight units, including **pennyweight**, which most jewellery scrap is
   still bought in
+- **Buy table** — rates by karat and weight band, because nobody runs one flat
+  percentage. Matched most-specific-first, so "all gold: 75%" and "22K over
+  50 g: 92%" coexist and the carve-out wins. The rate follows the scale as you
+  weigh, and you can always type over it
 - Payout percentage *or* a fixed offer — type a round number and the app tells
   you what percentage of melt you just offered
 - **Lot builder** for the realistic case: a bag of mixed karats, totalled
@@ -77,6 +81,9 @@ path of that sequence.
   resale or melting; the app warns before you mark something melted early
 - **Required-ID enforcement** — a purchase won't save without seller details
   unless you turn it off deliberately
+- **App lock** — optional Face ID / fingerprint / passcode on open, and again
+  after the app is backgrounded, so a phone left on the counter stays shut
+- **ID photo retention** — set a window and the app forgets them for you
 - **Over-melt warning** — paying more than the metal is worth is fine for a
   collectible and a mistake on scrap, so it's flagged either way
 - **Numismatic mode** — a graded coin is valued at its collector price, not melt
@@ -92,27 +99,49 @@ app/                     screens (expo-router, file-based)
   item/new, item/[id]    intake form and item record
   customer/…             customer records
   metal/[symbol]         price history and melt tables
+  settings/buy-table     the karat x weight-band rate editor
 src/
   lib/metals.ts          purity tables, unit conversion, the melt engine
+  lib/buyTable.ts        rate rules and most-specific-first resolution
   lib/spot/              price providers behind one interface
   lib/portfolio.ts       book valuation and P&L
+  lib/crypto/            envelope.ts is pure; index.ts holds the keychain
+  lib/retention.ts       which ID photos have aged out (pure)
   lib/export.ts          CSV
-  lib/storage.ts         AsyncStorage persistence
+  lib/storage.ts         encrypted persistence
   state/AppState.tsx     one provider: inventory, customers, settings, prices
-  components/            UI kit, chart, photo picker
-tests/                   the money math
+  components/            UI kit, chart, photo picker, lock/vault gate
+tests/                   money math, buy table, crypto, retention
 ```
 
 **The engine is pure and dependency-free.** `src/lib/metals.ts` imports nothing,
 so the same code backs the calculator, the intake form's live melt panel and the
 portfolio valuation — those three can't drift apart — and it's testable in plain
-node.
+node. The same split is applied wherever a policy is worth testing on its own:
+`buyTable.ts`, `retention.ts` and `crypto/envelope.ts` are all free of native
+imports, with the keychain and filesystem kept in thin wrappers beside them.
 
-**Everything is on-device.** Inventory, customers, ID details and photos live in
-AsyncStorage and the app's document directory. Nothing is uploaded. That's
-deliberate: a customer's driver's licence number isn't data to ship to a server
-by default, and the app has to work in a basement shop with no signal. The
-trade-off is real — a lost phone is a lost book, so the app pushes you to export.
+**Everything is on-device, and encrypted.** Inventory, customers and ID details
+are sealed with XChaCha20-Poly1305 under a 32-byte key held in the iOS Keychain
+/ Android Keystore. Nothing is uploaded. That's deliberate: a customer's
+driver's licence number isn't data to ship to a server by default, and the app
+has to work in a basement shop with no signal. The trade-off is real — a lost
+phone is a lost book, so the app pushes you to export.
+
+Three decisions inside that are worth not undoing:
+
+- **The key is not bound to biometrics.** Android invalidates Keystore entries
+  requiring authentication whenever a new fingerprint or face is enrolled, which
+  would permanently destroy the book. The optional app lock is a separate gate;
+  losing it never costs data.
+- **A failed decrypt is never treated as an empty book.** Showing "no items"
+  over records that are still there invites the operator to save on top of them.
+  Storage latches writes off, and the app shows what happened and offers only
+  two honest paths: recover the key, or knowingly erase.
+- **Item photos stay as plain files.** They're pictures of jewellery, read
+  constantly while scrolling, and the app sandbox is the control that matters.
+  ID photos get a configurable retention sweep instead, because holding a
+  customer's ID image longer than local rules require is a liability.
 
 **Photos are copied, not referenced.** The image picker hands back a URI in a
 cache directory the OS may purge; every photo is copied into the app's document

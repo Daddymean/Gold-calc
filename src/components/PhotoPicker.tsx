@@ -1,30 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import { deletePhoto, persistPhoto } from '@/lib/photos';
 import { colors, radius, spacing, type } from '@/theme';
-
-/**
- * Photos of an item.
- *
- * Picker results live in a cache directory the OS is free to purge, which would
- * silently empty an inventory record months later. Every image is copied into
- * the app's document directory first, and the stored URI points at that copy.
- */
-const PHOTO_DIR = `${FileSystem.documentDirectory}item-photos/`;
-
-async function persistPhoto(uri: string): Promise<string> {
-  await FileSystem.makeDirectoryAsync(PHOTO_DIR, { intermediates: true }).catch(() => {});
-  const extension = uri.split('.').pop()?.split('?')[0] || 'jpg';
-  const target = `${PHOTO_DIR}${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
-  await FileSystem.copyAsync({ from: uri, to: target });
-  return target;
-}
-
-export async function deletePhoto(uri: string): Promise<void> {
-  if (!uri.startsWith(PHOTO_DIR)) return;
-  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
-}
 
 export function PhotoPicker({
   photos,

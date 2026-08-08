@@ -131,6 +131,11 @@ export function Input({
       <TextInput
         placeholderTextColor={colors.textFaint}
         {...props}
+        // Set after the spread so it cannot be clobbered by an undefined prop.
+        // The visible label has to reach assistive tech too, or the field is
+        // announced as an unlabelled box; an explicit accessibilityLabel still
+        // wins, for cases where the visible text is too terse to be useful.
+        accessibilityLabel={props.accessibilityLabel ?? label}
         style={[s.input, props.multiline && s.inputMultiline, props.style]}
       />
       {!!suffix && <Text style={s.affix}>{suffix}</Text>}

@@ -1,10 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Customer, InventoryItem, PriceHistory, Settings, SpotQuote } from '@/types';
+import { decryptString, destroyMasterKey, encryptString, isEnvelope } from '@/lib/crypto';
+import type { BuyRule, Customer, InventoryItem, PriceHistory, Settings, SpotQuote } from '@/types';
 
 /**
- * Everything lives on the device. A buyer's book and their customers' ID
- * details are not data to ship to a server by default, and the app has to keep
- * working in a basement shop with no signal.
+ * Everything lives on the device, sealed with the device's master key. A
+ * customer's driver's licence number is not data to ship to a server by
+ * default, and the app has to keep working in a basement shop with no signal.
+ *
+ * Records written before encryption existed are plain JSON; they are read as-is
+ * and sealed the next time they are written, so upgrading loses nothing.
  */
 
 const KEYS = {
@@ -13,8 +17,12 @@ const KEYS = {
   settings: 'bb:settings:v1',
   quotes: 'bb:quotes:v1',
   history: 'bb:history:v1',
+  buyRules: 'bb:buyRules:v1',
   ticketSeq: 'bb:ticketSeq:v1',
 } as const;
+
+/** Values that are neither sensitive nor worth the round trip to seal. */
+const UNENCRYPTED_KEYS: string[] = [KEYS.ticketSeq];
 
 export const DEFAULT_SETTINGS: Settings = {
   currency: 'USD',
@@ -27,21 +35,66 @@ export const DEFAULT_SETTINGS: Settings = {
   spotProvider: 'demo',
   spotApiKey: '',
   refreshMinutes: 15,
+  useBuyTable: true,
+  appLockEnabled: false,
+  idPhotoRetentionDays: 0,
 };
 
+/**
+ * Raised when stored data exists but cannot be opened — a keystore failure, a
+ * restored backup whose key did not come with it, or a corrupt envelope.
+ *
+ * This must never be swallowed into an empty book. Showing "no items" and then
+ * saving over the top would destroy a dealer's records; the app blocks writes
+ * and surfaces the problem instead.
+ */
+export class VaultUnreadableError extends Error {
+  constructor(readonly storageKey: string, cause?: unknown) {
+    super('Stored data could not be decrypted.');
+    this.name = 'VaultUnreadableError';
+    this.cause = cause;
+  }
+}
+
+/** Latched once a read fails, so nothing can overwrite data we could not read. */
+let writesBlocked = false;
+
+export function areWritesBlocked(): boolean {
+  return writesBlocked;
+}
+
 async function readJson<T>(key: string, fallback: T): Promise<T> {
+  const raw = await AsyncStorage.getItem(key);
+  if (!raw) return fallback;
+
+  let plaintext: string;
+  if (isEnvelope(raw)) {
+    try {
+      plaintext = await decryptString(raw);
+    } catch (err) {
+      writesBlocked = true;
+      throw new VaultUnreadableError(key, err);
+    }
+  } else {
+    plaintext = raw;
+  }
+
   try {
-    const raw = await AsyncStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    return JSON.parse(plaintext) as T;
   } catch {
-    // A corrupt blob should degrade to empty rather than wedge the app on boot.
+    // Legacy plaintext that was already corrupt: degrade to empty rather than
+    // wedging the app on boot. Nothing was decryptable to lose here.
     return fallback;
   }
 }
 
 async function writeJson(key: string, value: unknown): Promise<void> {
-  await AsyncStorage.setItem(key, JSON.stringify(value));
+  if (writesBlocked) {
+    throw new VaultUnreadableError(key);
+  }
+  const json = JSON.stringify(value);
+  const payload = UNENCRYPTED_KEYS.includes(key) ? json : await encryptString(json);
+  await AsyncStorage.setItem(key, payload);
 }
 
 export const storage = {
@@ -50,6 +103,9 @@ export const storage = {
 
   loadCustomers: () => readJson<Customer[]>(KEYS.customers, []),
   saveCustomers: (customers: Customer[]) => writeJson(KEYS.customers, customers),
+
+  loadBuyRules: () => readJson<BuyRule[]>(KEYS.buyRules, []),
+  saveBuyRules: (rules: BuyRule[]) => writeJson(KEYS.buyRules, rules),
 
   async loadSettings(): Promise<Settings> {
     const stored = await readJson<Partial<Settings>>(KEYS.settings, {});
@@ -73,8 +129,14 @@ export const storage = {
     return `T-${String(next).padStart(4, '0')}`;
   },
 
+  /**
+   * Wipes the book and the key that opens it. Destroying the key matters: any
+   * copy of the data that survives in a device backup stays unreadable.
+   */
   async clearAll(): Promise<void> {
     await AsyncStorage.multiRemove(Object.values(KEYS));
+    await destroyMasterKey();
+    writesBlocked = false;
   },
 };
 

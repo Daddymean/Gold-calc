@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
+import { isSecureStorageAvailable } from '@/lib/crypto';
 import { PROVIDERS, type ProviderId } from '@/lib/spot';
 import { CURRENCIES, parseNumber } from '@/lib/format';
 import { METALS, METAL_ORDER, WEIGHT_UNITS, WEIGHT_UNIT_ORDER } from '@/lib/metals';
@@ -17,16 +19,20 @@ const PROVIDER_DOCS: Record<ProviderId, string> = {
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { settings, updateSettings, items, customers, resetAll, refreshQuotes, refreshing } = useApp();
+  const router = useRouter();
+  const { settings, updateSettings, items, customers, buyRules, resetAll, refreshQuotes, refreshing } =
+    useApp();
   const spot = useSpot();
 
   const [keyDraft, setKeyDraft] = useState(settings.spotApiKey);
   const [businessDraft, setBusinessDraft] = useState(settings.businessName);
   const [payoutDraft, setPayoutDraft] = useState(String(Math.round(settings.defaultPayoutRate * 100)));
   const [holdDraft, setHoldDraft] = useState(String(settings.holdPeriodDays));
+  const [retentionDraft, setRetentionDraft] = useState(String(settings.idPhotoRetentionDays));
   const [exporting, setExporting] = useState(false);
 
   const provider = PROVIDERS[settings.spotProvider as ProviderId];
+  const encrypted = isSecureStorageAvailable();
 
   const doExport = async (which: 'inventory' | 'customers') => {
     if (which === 'inventory' && !items.length) {
@@ -56,7 +62,7 @@ export default function SettingsScreen() {
   const confirmReset = () => {
     Alert.alert(
       'Erase everything?',
-      `This deletes ${items.length} item${items.length === 1 ? '' : 's'} and ${customers.length} customer record${customers.length === 1 ? '' : 's'} from this device. Export first if you want a copy — this cannot be undone.`,
+      `This deletes ${items.length} item${items.length === 1 ? '' : 's'} and ${customers.length} customer record${customers.length === 1 ? '' : 's'} from this device, and destroys the encryption key so no backup copy can be opened either. Export first if you want a copy — this cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Erase everything', style: 'destructive', onPress: () => resetAll() },
@@ -185,8 +191,40 @@ export default function SettingsScreen() {
             }}
             keyboardType="number-pad"
             suffix="%"
-            hint="What the calculator opens at. Scrap buyers typically run 70–90%."
+            hint="The fallback when no buy-table rule matches."
           />
+        </Card>
+      </View>
+
+      {/* -------------------------------------------------------- buy table */}
+      <View style={styles.section}>
+        <SectionLabel>Buy table</SectionLabel>
+        <Card>
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchLabel}>Price from the buy table</Text>
+              <Text style={styles.switchHint}>
+                Rates by karat and weight band, instead of one flat percentage.
+              </Text>
+            </View>
+            <Switch
+              value={settings.useBuyTable}
+              onValueChange={(v) => updateSettings({ useBuyTable: v })}
+              trackColor={{ true: colors.goldDim, false: colors.border }}
+              thumbColor={settings.useBuyTable ? colors.gold : colors.textFaint}
+            />
+          </View>
+
+          <View style={{ height: spacing.md }} />
+          <Button
+            label={buyRules.length ? `Edit rates (${buyRules.length})` : 'Set up your rates'}
+            variant="secondary"
+            onPress={() => router.push('/settings/buy-table')}
+          />
+          <Text style={styles.note}>
+            A bigger lot usually earns a better rate. The calculator picks the matching rate as you
+            weigh, and you can always type over it.
+          </Text>
         </Card>
       </View>
 
@@ -241,13 +279,67 @@ export default function SettingsScreen() {
         </Card>
       </View>
 
+      {/* -------------------------------------------------------- security */}
+      <View style={styles.section}>
+        <SectionLabel>Security</SectionLabel>
+        <Card>
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, { backgroundColor: encrypted ? colors.up : colors.warn }]} />
+            <Text style={styles.statusText}>
+              {encrypted
+                ? 'Your book is encrypted with a key held in this device’s secure hardware.'
+                : 'This preview has no secure keystore, so data is stored unencrypted. The iOS and Android apps always encrypt.'}
+            </Text>
+          </View>
+
+          <Divider />
+
+          <View style={styles.switchRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchLabel}>Require unlock to open</Text>
+              <Text style={styles.switchHint}>
+                Face ID, fingerprint or device passcode, and again after the app is backgrounded.
+              </Text>
+            </View>
+            <Switch
+              value={settings.appLockEnabled}
+              onValueChange={(v) => updateSettings({ appLockEnabled: v })}
+              trackColor={{ true: colors.goldDim, false: colors.border }}
+              thumbColor={settings.appLockEnabled ? colors.gold : colors.textFaint}
+            />
+          </View>
+
+          <Divider />
+
+          <Input
+            label="Delete ID photos after"
+            value={retentionDraft}
+            onChangeText={setRetentionDraft}
+            onBlur={() => {
+              const days = Math.max(0, Math.round(parseNumber(retentionDraft)));
+              setRetentionDraft(String(days));
+              updateSettings({ idPhotoRetentionDays: days });
+            }}
+            keyboardType="number-pad"
+            suffix="days"
+            hint="Runs on launch. 0 keeps them indefinitely. Holding a customer's ID image longer than your rules require is a liability, not an asset."
+          />
+
+          <Text style={styles.note}>
+            Item photos stay as ordinary files inside the app sandbox so lists scroll smoothly. The
+            sensitive material — names, ID numbers, dates of birth — is in the encrypted store.
+          </Text>
+        </Card>
+      </View>
+
       {/* ---------------------------------------------------------- export */}
       <View style={styles.section}>
         <SectionLabel>Your data</SectionLabel>
         <Card>
           <Text style={styles.note}>
             Everything lives on this device — inventory, customers, photos and ID details. Nothing is
-            uploaded. That also means a lost phone is a lost book, so export regularly.
+            uploaded. That also means a lost phone is a lost book, so export regularly. Exported CSV
+            is plain text, so treat the file as carefully as the records themselves.
           </Text>
           <View style={{ height: spacing.md }} />
           <Button
@@ -282,6 +374,10 @@ const styles = StyleSheet.create({
   strong: { color: colors.warn, fontWeight: '700' },
 
   keyActions: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
+
+  statusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  statusDot: { width: 7, height: 7, borderRadius: 4, marginTop: 6 },
+  statusText: { ...type.caption, color: colors.textMuted, lineHeight: 17, flex: 1 },
 
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   switchLabel: { ...type.body, color: colors.text, fontWeight: '600' },

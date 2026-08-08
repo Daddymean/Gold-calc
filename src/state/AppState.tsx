@@ -10,8 +10,12 @@ import React, {
 import { AppState as RNAppState } from 'react-native';
 import { getProvider, type ProviderId } from '@/lib/spot';
 import { METAL_ORDER } from '@/lib/metals';
-import { DEFAULT_SETTINGS, storage, uid } from '@/lib/storage';
+import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/storage';
+import { resolveRate, type RateQuery, type ResolvedRate } from '@/lib/buyTable';
+import { deletePhoto } from '@/lib/photos';
+import { expiredIdPhotoOwners } from '@/lib/retention';
 import type {
+  BuyRule,
   Customer,
   HistoryRange,
   InventoryItem,
@@ -30,6 +34,12 @@ import type {
 
 interface AppStateValue {
   ready: boolean;
+  /**
+   * Set when stored data exists but could not be decrypted. The app must not
+   * render an empty book in this state — that invites the operator to save over
+   * records that are still there, just unreadable.
+   */
+  vaultError: string | null;
 
   settings: Settings;
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
@@ -55,6 +65,11 @@ interface AppStateValue {
   history: Record<string, PriceHistory>;
   loadHistory: (metal: MetalSymbol, range: HistoryRange) => Promise<PriceHistory | null>;
   historyLoading: boolean;
+
+  buyRules: BuyRule[];
+  saveBuyRules: (rules: BuyRule[]) => Promise<void>;
+  /** Resolves the payout rate for a piece, honouring the useBuyTable setting. */
+  rateFor: (query: RateQuery) => ResolvedRate;
 
   resetAll: () => Promise<void>;
 }
@@ -88,6 +103,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [spotError, setSpotError] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, PriceHistory>>({});
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [buyRules, setBuyRules] = useState<BuyRule[]>([]);
+  const [vaultError, setVaultError] = useState<string | null>(null);
 
   // Kept in a ref so the refresh timer and app-foreground handler always read
   // current settings without being torn down and rebuilt on every keystroke.
@@ -101,20 +118,44 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [loadedSettings, loadedItems, loadedCustomers, cachedQuotes, cachedHistory] =
-        await Promise.all([
-          storage.loadSettings(),
-          storage.loadItems(),
-          storage.loadCustomers(),
-          storage.loadQuotes(),
-          storage.loadHistory(),
-        ]);
+      let loadedSettings: Settings;
+      let loadedItems: InventoryItem[];
+      let loadedCustomers: Customer[];
+      let loadedRules: BuyRule[];
+      let cachedQuotes: SpotQuote[];
+      let cachedHistory: Record<string, PriceHistory>;
+
+      try {
+        [loadedSettings, loadedItems, loadedCustomers, loadedRules, cachedQuotes, cachedHistory] =
+          await Promise.all([
+            storage.loadSettings(),
+            storage.loadItems(),
+            storage.loadCustomers(),
+            storage.loadBuyRules(),
+            storage.loadQuotes(),
+            storage.loadHistory(),
+          ]);
+      } catch (err) {
+        if (cancelled) return;
+        // Stop here rather than booting into an empty book. Storage has already
+        // latched writes off, so nothing can overwrite the records we failed to
+        // open; the UI shows what happened and offers the two real options.
+        setVaultError(
+          err instanceof VaultUnreadableError
+            ? 'Your book is encrypted with a key this device no longer has. It may have come from a backup restored without its keychain.'
+            : ((err as Error)?.message ?? 'Stored data could not be opened.'),
+        );
+        setReady(true);
+        return;
+      }
+
       if (cancelled) return;
 
       setSettings(loadedSettings);
       settingsRef.current = loadedSettings;
       setItems(loadedItems);
       setCustomers(loadedCustomers);
+      setBuyRules(loadedRules);
       // Merge rather than replace: a screen can mount and fetch its own series
       // before these reads resolve, and a plain assignment would throw that
       // fresher data away. Anything already in state wins over the cache.
@@ -127,6 +168,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         setQuotesUpdatedAt(cachedQuotes[0]?.fetchedAt ?? null);
       }
       setReady(true);
+
+      // Retention sweep: drop ID images that have outlived the window the
+      // operator configured. Runs after the book is on screen so a slow
+      // filesystem never delays the first paint.
+      const expired = expiredIdPhotoOwners(loadedCustomers, loadedSettings.idPhotoRetentionDays);
+      if (expired.length) {
+        const swept = loadedCustomers.map((customer) =>
+          expired.includes(customer.id)
+            ? { ...customer, idPhotoUri: undefined, updatedAt: new Date().toISOString() }
+            : customer,
+        );
+        await Promise.all(
+          loadedCustomers
+            .filter((c) => expired.includes(c.id) && c.idPhotoUri)
+            .map((c) => deletePhoto(c.idPhotoUri!)),
+        );
+        if (cancelled) return;
+        setCustomers(swept);
+        await storage.saveCustomers(swept);
+      }
     })();
     return () => {
       cancelled = true;
@@ -309,6 +370,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [customers, persistCustomers],
   );
 
+  const saveBuyRules: AppStateValue['saveBuyRules'] = useCallback(async (rules) => {
+    setBuyRules(rules);
+    await storage.saveBuyRules(rules);
+  }, []);
+
+  // Reads settings directly rather than through the ref: a screen memoising on
+  // rateFor must recompute when the toggle or the default rate changes, and a
+  // ref read would leave it quoting the old number.
+  const rateFor: AppStateValue['rateFor'] = useCallback(
+    (query) =>
+      // Turning the table off behaves exactly as if it were empty, so the
+      // toggle never leaves a stale rule quietly influencing a quote.
+      resolveRate(settings.useBuyTable ? buyRules : [], query, settings.defaultPayoutRate),
+    [buyRules, settings.useBuyTable, settings.defaultPayoutRate],
+  );
+
   const updateSettings: AppStateValue['updateSettings'] = useCallback(
     async (patch) => {
       const next = { ...settingsRef.current, ...patch };
@@ -327,6 +404,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const resetAll = useCallback(async () => {
     await storage.clearAll();
+    setVaultError(null);
+    setBuyRules([]);
     setItems([]);
     setCustomers([]);
     setSettings(DEFAULT_SETTINGS);
@@ -339,6 +418,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(
     () => ({
       ready,
+      vaultError,
       settings,
       updateSettings,
       items,
@@ -359,10 +439,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       history,
       loadHistory,
       historyLoading,
+      buyRules,
+      saveBuyRules,
+      rateFor,
       resetAll,
     }),
     [
       ready,
+      vaultError,
       settings,
       updateSettings,
       items,
@@ -381,6 +465,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       history,
       loadHistory,
       historyLoading,
+      buyRules,
+      saveBuyRules,
+      rateFor,
       resetAll,
     ],
   );

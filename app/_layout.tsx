@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppStateProvider } from '@/state/AppState';
+import { AppGate } from '@/components/AppGate';
 import { colors } from '@/theme';
 
 export default function RootLayout() {
@@ -12,28 +13,31 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AppStateProvider>
           <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: colors.bg },
-              headerTintColor: colors.text,
-              headerTitleStyle: { fontWeight: '700' },
-              headerShadowVisible: false,
-              contentStyle: { backgroundColor: colors.bg },
-            }}
-          >
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="item/new"
-              options={{ title: 'Add to inventory', presentation: 'modal' }}
-            />
-            <Stack.Screen name="item/[id]" options={{ title: 'Item' }} />
-            <Stack.Screen
-              name="customer/new"
-              options={{ title: 'New customer', presentation: 'modal' }}
-            />
-            <Stack.Screen name="customer/[id]" options={{ title: 'Customer' }} />
-            <Stack.Screen name="metal/[symbol]" options={{ title: 'Price history' }} />
-          </Stack>
+          <AppGate>
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.bg },
+                headerTintColor: colors.text,
+                headerTitleStyle: { fontWeight: '700' },
+                headerShadowVisible: false,
+                contentStyle: { backgroundColor: colors.bg },
+              }}
+            >
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="item/new"
+                options={{ title: 'Add to inventory', presentation: 'modal' }}
+              />
+              <Stack.Screen name="item/[id]" options={{ title: 'Item' }} />
+              <Stack.Screen
+                name="customer/new"
+                options={{ title: 'New customer', presentation: 'modal' }}
+              />
+              <Stack.Screen name="customer/[id]" options={{ title: 'Customer' }} />
+              <Stack.Screen name="metal/[symbol]" options={{ title: 'Price history' }} />
+              <Stack.Screen name="settings/buy-table" options={{ title: 'Buy table' }} />
+            </Stack>
+          </AppGate>
         </AppStateProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
