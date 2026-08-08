@@ -18,3 +18,6 @@ yarn-error.*
 expo-env.d.ts
 ios/
 android/
+
+# Web build output
+dist/

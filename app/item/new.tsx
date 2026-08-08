@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { notify } from '@/lib/confirm';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
@@ -144,7 +144,7 @@ export default function NewItemScreen() {
   const save = async () => {
     const problem = validate();
     if (problem) {
-      Alert.alert('Check the record', problem);
+      notify('Check the record', problem);
       return;
     }
 
@@ -192,7 +192,7 @@ export default function NewItemScreen() {
 
       router.replace(`/item/${item.id}`);
     } catch (err: any) {
-      Alert.alert('Could not save', err?.message ?? 'Unknown error');
+      notify('Could not save', err?.message ?? 'Unknown error');
       setSaving(false);
     }
   };

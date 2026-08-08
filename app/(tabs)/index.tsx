@@ -9,6 +9,7 @@ import { metalsPresent, summarisePortfolio } from '@/lib/portfolio';
 import { MetalRow } from '@/components/MetalTicker';
 import { CompositionBar } from '@/components/PriceChart';
 import { Badge, Button, Card, Divider, SectionLabel } from '@/components/ui';
+import { IS_DEMO } from '@/lib/demoMode';
 import { colors, radius, spacing, type } from '@/theme';
 
 export default function PricesScreen() {
@@ -47,6 +48,17 @@ export default function PricesScreen() {
         />
       }
     >
+      {IS_DEMO && (
+        <View style={styles.demoBar}>
+          <Text style={styles.demoTitle}>This is a demo</Text>
+          <Text style={styles.demoBody}>
+            The inventory, customers and prices below are all made up, so you can try the app
+            without setting anything up. Everything you change stays in this browser. Reset it any
+            time from Settings.
+          </Text>
+        </View>
+      )}
+
       {/* Provenance sits above everything: nobody should pay out against a
           number without knowing where it came from and how old it is. */}
       <View style={styles.feedBar}>
@@ -204,6 +216,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  demoBar: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: `${colors.info}14`,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: `${colors.info}44`,
+  },
+  demoTitle: { ...type.label, color: colors.info },
+  demoBody: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: 2 },
+
   feedDot: { width: 7, height: 7, borderRadius: 4 },
   feedText: { ...type.caption, color: colors.textMuted, flex: 1 },
 

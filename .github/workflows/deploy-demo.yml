@@ -1,0 +1,71 @@
+name: Deploy demo
+
+# Publishes the web build to GitHub Pages so prospective users can try the app
+# from a link, with no install. The demo flag seeds a sample book and labels
+# every price as simulated.
+
+on:
+  push:
+    branches: [claude/precious-metals-app-x5lws6]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; the newest push wins.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.6+ required: the test runner uses --experimental-strip-types to
+          # execute the TypeScript sources directly.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Export web build
+        env:
+          # Project sites live at /<repo>/, so assets and routes need the prefix.
+          EXPO_PUBLIC_BASE_URL: /${{ github.event.repository.name }}
+          EXPO_PUBLIC_DEMO: '1'
+        run: npx expo export -p web --output-dir dist
+
+      - name: Prepare for Pages
+        run: |
+          # Pages runs Jekyll by default, which drops directories beginning with
+          # an underscore — that would delete the whole _expo bundle directory.
+          touch dist/.nojekyll
+          # Single-page output means only index.html exists. Serving it as the
+          # 404 page lets a deep link like /inventory resolve client-side.
+          cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -14,6 +14,8 @@ import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/stor
 import { resolveRate, type RateQuery, type ResolvedRate } from '@/lib/buyTable';
 import { deletePhoto } from '@/lib/photos';
 import { expiredIdPhotoOwners } from '@/lib/retention';
+import { buildDemoBook } from '@/lib/demo';
+import { IS_DEMO } from '@/lib/demoMode';
 import type {
   BuyRule,
   Customer,
@@ -150,6 +152,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (cancelled) return;
+
+      // The public demo seeds a sample book on a first visit so a prospect sees
+      // a working counter rather than an empty app. Only ever when the book is
+      // genuinely empty, so a visitor's own edits are never overwritten.
+      if (IS_DEMO && !loadedItems.length && !loadedCustomers.length) {
+        const seeded = buildDemoBook(uid);
+        loadedItems = seeded.items;
+        loadedCustomers = seeded.customers;
+        loadedRules = seeded.buyRules;
+        await Promise.all([
+          storage.saveItems(seeded.items),
+          storage.saveCustomers(seeded.customers),
+          storage.saveBuyRules(seeded.buyRules),
+        ]);
+      }
 
       setSettings(loadedSettings);
       settingsRef.current = loadedSettings;

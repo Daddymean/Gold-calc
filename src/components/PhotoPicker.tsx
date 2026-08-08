@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { confirm, notify } from '@/lib/confirm';
 import * as ImagePicker from 'expo-image-picker';
 import { deletePhoto, persistPhoto } from '@/lib/photos';
 import { colors, radius, spacing, type } from '@/theme';
@@ -21,7 +22,7 @@ export function PhotoPicker({
 
   const add = async (source: 'camera' | 'library') => {
     if (photos.length >= max) {
-      Alert.alert('Photo limit', `Up to ${max} photos per record.`);
+      notify('Photo limit', `Up to ${max} photos per record.`);
       return;
     }
     setBusy(true);
@@ -32,7 +33,7 @@ export function PhotoPicker({
           : await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert(
+        notify(
           'Permission needed',
           source === 'camera'
             ? 'Allow camera access to photograph items at the counter.'
@@ -60,24 +61,22 @@ export function PhotoPicker({
       const saved = await Promise.all(result.assets.map((asset) => persistPhoto(asset.uri)));
       onChange([...photos, ...saved].slice(0, max));
     } catch (err: any) {
-      Alert.alert('Could not add photo', err?.message ?? 'Unknown error');
+      notify('Could not add photo', err?.message ?? 'Unknown error');
     } finally {
       setBusy(false);
     }
   };
 
-  const remove = (uri: string) => {
-    Alert.alert('Remove photo?', 'This deletes the image from the record.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          onChange(photos.filter((p) => p !== uri));
-          await deletePhoto(uri);
-        },
-      },
-    ]);
+  const remove = async (uri: string) => {
+    const ok = await confirm({
+      title: 'Remove photo?',
+      message: 'This deletes the image from the record.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
+    onChange(photos.filter((p) => p !== uri));
+    await deletePhoto(uri);
   };
 
   return (

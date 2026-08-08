@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { confirm } from '@/lib/confirm';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/state/AppState';
@@ -47,24 +48,18 @@ export default function CustomerDetailScreen() {
     );
   }
 
-  const confirmDelete = () => {
-    Alert.alert(
-      'Delete customer?',
-      theirs.length
+  const confirmDelete = async () => {
+    const ok = await confirm({
+      title: 'Delete customer?',
+      message: theirs.length
         ? `${customer.name} is linked to ${theirs.length} item${theirs.length === 1 ? '' : 's'}. Those records keep the name but lose the ID details.`
         : `Delete ${customer.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteCustomer(customer.id);
-            router.back();
-          },
-        },
-      ],
-    );
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteCustomer(customer.id);
+    router.back();
   };
 
   return (

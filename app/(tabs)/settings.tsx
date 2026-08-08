@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { confirm, notify } from '@/lib/confirm';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
 import { isSecureStorageAvailable } from '@/lib/crypto';
+import { IS_DEMO } from '@/lib/demoMode';
 import { PROVIDERS, type ProviderId } from '@/lib/spot';
 import { CURRENCIES, parseNumber } from '@/lib/format';
 import { METALS, METAL_ORDER, WEIGHT_UNITS, WEIGHT_UNIT_ORDER } from '@/lib/metals';
@@ -36,11 +38,11 @@ export default function SettingsScreen() {
 
   const doExport = async (which: 'inventory' | 'customers') => {
     if (which === 'inventory' && !items.length) {
-      Alert.alert('Nothing to export', 'Your inventory is empty.');
+      notify('Nothing to export', 'Your inventory is empty.');
       return;
     }
     if (which === 'customers' && !customers.length) {
-      Alert.alert('Nothing to export', 'You have no customer records.');
+      notify('Nothing to export', 'You have no customer records.');
       return;
     }
 
@@ -53,21 +55,20 @@ export default function SettingsScreen() {
         await shareCsv(`customers-${stamp}.csv`, customersCsv(customers, items));
       }
     } catch (err: any) {
-      Alert.alert('Export failed', err?.message ?? 'Unknown error');
+      notify('Export failed', err?.message ?? 'Unknown error');
     } finally {
       setExporting(false);
     }
   };
 
-  const confirmReset = () => {
-    Alert.alert(
-      'Erase everything?',
-      `This deletes ${items.length} item${items.length === 1 ? '' : 's'} and ${customers.length} customer record${customers.length === 1 ? '' : 's'} from this device, and destroys the encryption key so no backup copy can be opened either. Export first if you want a copy — this cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Erase everything', style: 'destructive', onPress: () => resetAll() },
-      ],
-    );
+  const confirmReset = async () => {
+    const ok = await confirm({
+      title: 'Erase everything?',
+      message: `This deletes ${items.length} item${items.length === 1 ? '' : 's'} and ${customers.length} customer record${customers.length === 1 ? '' : 's'} from this device, and destroys the encryption key so no backup copy can be opened either. Export first if you want a copy — this cannot be undone.`,
+      confirmLabel: 'Erase everything',
+      destructive: true,
+    });
+    if (ok) await resetAll();
   };
 
   return (
@@ -356,7 +357,16 @@ export default function SettingsScreen() {
             onPress={() => doExport('customers')}
           />
           <View style={{ height: spacing.lg }} />
-          <Button label="Erase all data" variant="danger" onPress={confirmReset} />
+          <Button
+            label={IS_DEMO ? 'Reset the demo' : 'Erase all data'}
+            variant="danger"
+            onPress={confirmReset}
+          />
+          {IS_DEMO && (
+            <Text style={styles.note}>
+              Clears everything you changed and reloads the sample book on the next visit.
+            </Text>
+          )}
         </Card>
       </View>
 

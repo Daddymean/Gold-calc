@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { confirm } from '@/lib/confirm';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/state/AppState';
 import { METALS, METAL_ORDER, findPurity, puritiesFor, type MetalSymbol } from '@/lib/metals';
@@ -46,26 +46,24 @@ export default function BuyTableScreen() {
     setEditing(null);
   };
 
-  const remove = (rule: BuyRule) => {
-    Alert.alert('Remove this rate?', 'Pieces matching it fall back to a wider rule or your default.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => saveBuyRules(buyRules.filter((r) => r.id !== rule.id)),
-      },
-    ]);
+  const remove = async (rule: BuyRule) => {
+    const ok = await confirm({
+      title: 'Remove this rate?',
+      message: 'Pieces matching it fall back to a wider rule or your default.',
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (ok) await saveBuyRules(buyRules.filter((r) => r.id !== rule.id));
   };
 
-  const loadStarter = () => {
-    Alert.alert(
-      'Load a starter table?',
-      'Adds a typical set of rates for all four metals. Your existing rules are kept — remove any you do not want.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Add them', onPress: () => saveBuyRules([...buyRules, ...starterRules(uid)]) },
-      ],
-    );
+  const loadStarter = async () => {
+    const ok = await confirm({
+      title: 'Load a starter table?',
+      message:
+        'Adds a typical set of rates for all four metals. Your existing rules are kept — remove any you do not want.',
+      confirmLabel: 'Add them',
+    });
+    if (ok) await saveBuyRules([...buyRules, ...starterRules(uid)]);
   };
 
   if (editing) {

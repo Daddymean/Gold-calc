@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { confirm, notify } from '@/lib/confirm';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
@@ -75,39 +76,38 @@ export default function ItemDetailScreen() {
       );
       // Android has no Alert.prompt; fall back to the inline field below.
       if (!Alert.prompt) {
-        Alert.alert('Enter the sale price', 'Use the sale price field further down, then tap Sold again.');
+        notify('Enter the sale price', 'Use the sale price field further down, then tap Sold again.');
       }
       return;
     }
 
     if (status === 'melted' && underHold) {
-      Alert.alert(
-        'Still inside the hold period',
-        `Your settings require holding items ${settings.holdPeriodDays} days. This one has ${holdRemaining} day${holdRemaining === 1 ? '' : 's'} to go.`,
-        [
-          { text: 'Keep holding', style: 'cancel' },
-          { text: 'Mark melted anyway', style: 'destructive', onPress: () => updateItem(item.id, { status }) },
-        ],
-      );
+      confirm({
+        title: 'Still inside the hold period',
+        message: `Your settings require holding items ${settings.holdPeriodDays} days. This one has ${holdRemaining} day${holdRemaining === 1 ? '' : 's'} to go.`,
+        confirmLabel: 'Mark melted anyway',
+        cancelLabel: 'Keep holding',
+        destructive: true,
+      }).then((ok) => {
+        if (ok) updateItem(item.id, { status });
+      });
       return;
     }
 
     updateItem(item.id, { status, salePrice: undefined, soldAt: undefined });
   };
 
-  const confirmDelete = () => {
-    Alert.alert('Delete this record?', `${item.ticket} — ${item.description}. This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await Promise.all(item.photoUris.map(deletePhoto));
-          await deleteItem(item.id);
-          router.back();
-        },
-      },
-    ]);
+  const confirmDelete = async () => {
+    const ok = await confirm({
+      title: 'Delete this record?',
+      message: `${item.ticket} — ${item.description}. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await Promise.all(item.photoUris.map(deletePhoto));
+    await deleteItem(item.id);
+    router.back();
   };
 
   return (

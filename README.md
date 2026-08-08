@@ -26,6 +26,31 @@ npm test        # money math, buy table, crypto, retention — 54 tests, no nati
 npm run typecheck
 ```
 
+## The hosted demo
+
+Pushing to the development branch builds the web app and publishes it to GitHub
+Pages via `.github/workflows/deploy-demo.yml`. That build sets two variables:
+
+- `EXPO_PUBLIC_DEMO=1` seeds a sample book — four customers, ten items across
+  all four metals, a populated buy table — so a visitor sees a working counter
+  instead of an empty app, and shows a banner saying the data is invented. Every
+  seeded figure is derived through the real melt engine from a stated spot price
+  on the purchase date, so the margins and portfolio totals are consistent.
+- `EXPO_PUBLIC_BASE_URL=/<repo>` prefixes assets and routes, because a project
+  site is served from a subpath rather than the domain root.
+
+To reproduce it locally:
+
+```bash
+EXPO_PUBLIC_BASE_URL=/Gold-calc EXPO_PUBLIC_DEMO=1 npx expo export -p web --output-dir dist
+```
+
+**What the web demo can't show.** There's no keystore in a browser, so the demo
+stores data unencrypted and says so on the Settings screen. Desktop browsers
+have no camera capture (a mobile browser will offer one through the file
+picker), and the OS share sheet used by CSV export doesn't exist. For a
+high-fidelity demo on a real phone, publish an EAS Update and open it in Expo Go.
+
 ---
 
 ## What's in it
