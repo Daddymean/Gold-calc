@@ -26,10 +26,17 @@ npm test        # money math, buy table, crypto, retention — 54 tests, no nati
 npm run typecheck
 ```
 
+## Branches
+
+Work happens on a feature branch; **`main` is the publish branch**. Pushing to
+`main` is what updates the public demo, so merging is a deliberate release step
+rather than something every commit triggers. The deploy can also be run by hand
+from the Actions tab without a merge.
+
 ## The hosted demo
 
-Pushing to the development branch builds the web app and publishes it to GitHub
-Pages via `.github/workflows/deploy-demo.yml`. That build sets two variables:
+Pushing to `main` builds the web app and publishes it to GitHub Pages via
+`.github/workflows/deploy-demo.yml`. That build sets two variables:
 
 - `EXPO_PUBLIC_DEMO=1` seeds a sample book — four customers, ten items across
   all four metals, a populated buy table — so a visitor sees a working counter

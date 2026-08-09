@@ -4,9 +4,12 @@ name: Deploy demo
 # from a link, with no install. The demo flag seeds a sample book and labels
 # every price as simulated.
 
+# Only `main` publishes. Day-to-day work happens on a feature branch, so
+# merging to main is the deliberate act of updating the public demo rather
+# than something every commit does.
 on:
   push:
-    branches: [claude/precious-metals-app-x5lws6]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
