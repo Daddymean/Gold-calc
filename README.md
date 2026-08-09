@@ -48,8 +48,38 @@ EXPO_PUBLIC_BASE_URL=/Gold-calc EXPO_PUBLIC_DEMO=1 npx expo export -p web --outp
 **What the web demo can't show.** There's no keystore in a browser, so the demo
 stores data unencrypted and says so on the Settings screen. Desktop browsers
 have no camera capture (a mobile browser will offer one through the file
-picker), and the OS share sheet used by CSV export doesn't exist. For a
-high-fidelity demo on a real phone, publish an EAS Update and open it in Expo Go.
+picker), and the OS share sheet used by CSV export doesn't exist.
+
+## Demos on a real device
+
+`eas.json` defines two internal-distribution profiles: **demo** (seeded sample
+book, for someone who has never seen the app) and **preview** (empty book, for
+someone trying it against their own stock). Build them from the Actions tab via
+the *Build app* workflow, which is manual-only — the free Expo plan includes 15
+Android and 15 iOS builds a month, and building on every push would spend that
+without anyone asking.
+
+One-time setup:
+
+1. Create a free account at expo.dev.
+2. `npx eas-cli login && npx eas-cli init` — writes `owner` and
+   `extra.eas.projectId` into the app config and links the repo to the project.
+3. Create an access token (expo.dev → account settings → access tokens) and add
+   it to this repo as the `EXPO_TOKEN` secret.
+
+**Android is the cheap path.** The demo profile builds an APK; EAS returns a
+shareable install link, testers accept the "unknown apps" warning, and no Google
+Play account is involved.
+
+**iOS needs the Apple Developer Program ($99/yr), with no way around it.**
+TestFlight is the better route for people you don't know; ad-hoc internal
+distribution works too but needs each device's UDID registered in advance and
+caps at 100 devices a year.
+
+**Expo Go is not a distribution channel.** Since 12 May 2026 it only loads EAS
+Update projects owned by you or by an organisation you belong to, so a prospect
+cannot open your link. It is still useful for a demo you drive yourself
+(`npx expo start --tunnel`) or for teammates added to your Expo org.
 
 ---
 

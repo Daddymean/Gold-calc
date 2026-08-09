@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development"
+    },
+
+    "demo": {
+      "//": "Seeded sample book, for showing the app to someone who has never seen it. Android builds an APK a tester can sideload with no Play account.",
+      "distribution": "internal",
+      "channel": "demo",
+      "android": { "buildType": "apk" },
+      "env": {
+        "EXPO_PUBLIC_DEMO": "1"
+      }
+    },
+
+    "preview": {
+      "//": "Clean build with an empty book, for someone who wants to try it against their own stock.",
+      "distribution": "internal",
+      "channel": "preview",
+      "android": { "buildType": "apk" }
+    },
+
+    "production": {
+      "channel": "production",
+      "android": { "buildType": "app-bundle" },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
