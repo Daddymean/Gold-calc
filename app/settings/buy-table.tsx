@@ -45,7 +45,13 @@ export default function BuyTableScreen() {
     [overlaps],
   );
 
-  const upsert = async (rule: BuyRule) => {
+  const upsert = async (incoming: BuyRule) => {
+    // A posted per-gram price is meaningless without the currency it was
+    // entered in, and the display currency can change later.
+    const rule: BuyRule =
+      ruleMode(incoming) === 'perGram'
+        ? { ...incoming, currency: settings.currency }
+        : { ...incoming, currency: undefined };
     const exists = buyRules.some((r) => r.id === rule.id);
     await saveBuyRules(
       exists ? buyRules.map((r) => (r.id === rule.id ? rule : r)) : [...buyRules, rule],

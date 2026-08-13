@@ -14,7 +14,13 @@ import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/stor
 import { resolveOffer, type RateQuery, type ResolvedOffer } from '@/lib/buyTable';
 import { deletePhoto } from '@/lib/photos';
 import { expiredIdPhotoOwners } from '@/lib/retention';
-import { calculateExpectedContent, NO_FEES, type AssayLine, type LotFees } from '@/lib/refining';
+import {
+  activeLotItemIds,
+  calculateExpectedContent,
+  NO_FEES,
+  type AssayLine,
+  type LotFees,
+} from '@/lib/refining';
 import { buildDemoBook } from '@/lib/demo';
 import { IS_DEMO } from '@/lib/demoMode';
 import type {
@@ -422,12 +428,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const createLot: AppStateValue['createLot'] = useCallback(
     async (itemIds, refinerName) => {
-      const chosen = items.filter((item) => itemIds.includes(item.id));
+      // An item must not sit in two unsettled lots: both could be sent and
+      // settled, and the same purchase price would be counted against two
+      // different refining results, inventing profit that never existed.
+      const reserved = activeLotItemIds(lots);
+      const free = itemIds.filter((itemId) => !reserved.has(itemId));
+      if (!free.length) {
+        throw new Error('Every item chosen is already in another open lot.');
+      }
+
+      const chosen = items.filter((item) => free.includes(item.id));
       const lot: MeltLot = {
         id: uid(),
         reference: await storage.nextLotReference(),
         refinerName: refinerName.trim(),
-        itemIds,
+        itemIds: free,
         status: 'open',
         // Frozen now: the lot's profit must be measured against what these
         // items actually cost, even if an item is edited or deleted later.
@@ -525,8 +540,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         meltValue,
         grossGrams,
         settings.defaultPayoutRate,
+        settings.currency,
       ),
-    [buyRules, settings.useBuyTable, settings.defaultPayoutRate],
+    [buyRules, settings.useBuyTable, settings.defaultPayoutRate, settings.currency],
   );
 
   const updateSettings: AppStateValue['updateSettings'] = useCallback(

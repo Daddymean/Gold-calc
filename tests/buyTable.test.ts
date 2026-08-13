@@ -287,3 +287,65 @@ test('a zero-weight query cannot divide by zero', () => {
   assert.equal(offer.perGram, 0);
   assert.equal(offer.impliedRate, 0);
 });
+
+/* ------------------------------------------------- posted price currency */
+
+test('a posted price entered in another currency is refused, not reinterpreted', () => {
+  // 42 euros is not 42 dollars. Using the number anyway would misprice the
+  // offer by the exchange rate, so the default percentage takes over instead.
+  const euroRule = rule({ mode: 'perGram', perGram: 42, currency: 'EUR' });
+  const offer = resolveOffer(
+    [euroRule],
+    { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' },
+    1000,
+    10,
+    0.8,
+    'USD',
+  );
+
+  assert.ok(offer.currencyMismatch);
+  assert.equal(offer.mode, 'percent');
+  assert.equal(offer.payout, 800, 'falls back to the default rate');
+  assert.match(offer.reason, /EUR/);
+});
+
+test('a posted price in the matching currency is used normally', () => {
+  const offer = resolveOffer(
+    [rule({ mode: 'perGram', perGram: 42, currency: 'USD' })],
+    { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' },
+    1000,
+    10,
+    0.8,
+    'USD',
+  );
+  assert.ok(!offer.currencyMismatch);
+  assert.equal(offer.payout, 420);
+});
+
+test('a percentage rule is currency-independent and never mismatches', () => {
+  const offer = resolveOffer(
+    [rule({ rate: 0.8, currency: 'EUR' })],
+    { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' },
+    1000,
+    10,
+    0.5,
+    'USD',
+  );
+  assert.ok(!offer.currencyMismatch);
+  assert.equal(offer.payout, 800);
+});
+
+test('a legacy posted rule with no recorded currency is still honoured', () => {
+  // Rules written before the currency stamp cannot be proven wrong, and
+  // refusing them would break tables that are working today.
+  const offer = resolveOffer(
+    [rule({ mode: 'perGram', perGram: 42 })],
+    { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' },
+    1000,
+    10,
+    0.8,
+    'USD',
+  );
+  assert.ok(!offer.currencyMismatch);
+  assert.equal(offer.payout, 420);
+});

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { TROY_OUNCE_IN_GRAMS } from '../src/lib/metals.ts';
 import {
   NO_FEES,
+  activeLotItemIds,
   calculateAssayLine,
   calculateExpectedContent,
   calculateSettlement,
@@ -230,4 +231,28 @@ test('a suggested line with no live price is left at zero for the operator to fi
   const expected = calculateExpectedContent([items[0]]);
   const suggested = suggestAssayLines(expected, {}, () => 'id');
   assert.equal(suggested[0].pricePerTroyOz, 0);
+});
+
+/* -------------------------------------------------------- lot reservation */
+
+test('items in unsettled lots are reserved, settled ones are not', () => {
+  const lots = [
+    { id: 'a', status: 'open' as const, itemIds: ['i1', 'i2'] },
+    { id: 'b', status: 'sent' as const, itemIds: ['i3'] },
+    { id: 'c', status: 'settled' as const, itemIds: ['i4'] },
+  ];
+  const reserved = activeLotItemIds(lots);
+
+  assert.ok(reserved.has('i1') && reserved.has('i2') && reserved.has('i3'));
+  assert.ok(!reserved.has('i4'), 'a settled lot is history and reserves nothing');
+});
+
+test('a lot can be excluded so it does not reserve against itself', () => {
+  const lots = [{ id: 'a', status: 'open' as const, itemIds: ['i1'] }];
+  assert.ok(activeLotItemIds(lots).has('i1'));
+  assert.ok(!activeLotItemIds(lots, 'a').has('i1'));
+});
+
+test('no lots reserve nothing', () => {
+  assert.equal(activeLotItemIds([]).size, 0);
 });

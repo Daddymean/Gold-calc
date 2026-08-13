@@ -4,7 +4,8 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/state/AppState';
 import { METALS, findPurity } from '@/lib/metals';
-import { calculateExpectedContent } from '@/lib/refining';
+import { activeLotItemIds, calculateExpectedContent } from '@/lib/refining';
+import { itemsUnderHold } from '@/lib/retention';
 import { money, shortDate, weight as fmtWeight } from '@/lib/format';
 import { notify } from '@/lib/confirm';
 import { Badge, Button, Card, EmptyState, Input, SectionLabel, StatRow } from '@/components/ui';
@@ -21,15 +22,29 @@ import { colors, radius, spacing, type } from '@/theme';
 export default function NewLotScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { items, settings, createLot } = useApp();
+  const { items, lots, settings, createLot } = useApp();
 
   const [refiner, setRefiner] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // Items already committed to an unsettled lot are not offered again, or the
+  // same metal and the same cost would end up in two refining results.
+  const reserved = useMemo(() => activeLotItemIds(lots), [lots]);
   const eligible = useMemo(
-    () => items.filter((item) => item.status === 'in_stock' || item.status === 'on_hold'),
-    [items],
+    () =>
+      items.filter(
+        (item) =>
+          (item.status === 'in_stock' || item.status === 'on_hold') && !reserved.has(item.id),
+      ),
+    [items, reserved],
+  );
+
+  // Flagged rather than hidden: a hold is the operator's rule to override
+  // knowingly, and the send step asks again before anything is melted.
+  const heldIds = useMemo(
+    () => new Set(itemsUnderHold(eligible, settings.holdPeriodDays)),
+    [eligible, settings.holdPeriodDays],
   );
 
   const chosen = useMemo(
@@ -51,6 +66,8 @@ export default function NewLotScreen() {
     try {
       const lot = await createLot(selected, refiner);
       router.replace(`/lots/${lot.id}`);
+    } catch (err: any) {
+      notify('Could not create the lot', err?.message ?? 'Unknown error');
     } finally {
       setSaving(false);
     }
@@ -59,8 +76,12 @@ export default function NewLotScreen() {
   if (!eligible.length) {
     return (
       <EmptyState
-        title="Nothing on the shelf"
-        body="Only items that are in stock or on hold can go into a refining lot."
+        title="Nothing available"
+        body={
+          reserved.size
+            ? 'Everything in stock is already committed to an open lot. Settle or delete that lot to free the items up.'
+            : 'Only items that are in stock or on hold can go into a refining lot.'
+        }
         action={<Button label="Back" variant="secondary" onPress={() => router.back()} />}
       />
     );
@@ -117,6 +138,11 @@ export default function NewLotScreen() {
                       {item.isNumismatic && (
                         <View style={{ marginTop: spacing.xs }}>
                           <Badge label="COLLECTIBLE — WORTH MORE INTACT" tone="warn" />
+                        </View>
+                      )}
+                      {heldIds.has(item.id) && (
+                        <View style={{ marginTop: spacing.xs }}>
+                          <Badge label="STILL INSIDE THE HOLD PERIOD" tone="warn" />
                         </View>
                       )}
                     </View>

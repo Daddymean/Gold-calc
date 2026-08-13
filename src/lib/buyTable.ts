@@ -1,6 +1,7 @@
 // Relative rather than the '@/' alias on purpose: this module is exercised by
 // the node test runner, which does not resolve the bundler's path alias.
 import { findPurity, toGrams, type MetalSymbol, type WeightUnit } from './metals.ts';
+import type { CurrencyCode } from './format.ts';
 
 /**
  * The buy table.
@@ -46,6 +47,12 @@ export interface BuyRule {
    * is 'perGram'.
    */
   perGram?: number;
+  /**
+   * Currency a posted per-gram price was entered in. A percentage rule needs
+   * none — it is a ratio — but a bare 42 means nothing without knowing whether
+   * it was dollars or euros, and the app lets the display currency change.
+   */
+  currency?: CurrencyCode;
   label?: string;
 }
 
@@ -150,6 +157,12 @@ export interface ResolvedOffer {
    * worth revisiting — either giving metal away or pricing nobody would accept.
    */
   stale: boolean;
+  /**
+   * True when a posted price was entered in a different currency than the one
+   * now displayed. The price is NOT used in that case — 42 euros is not 42
+   * dollars, and quietly treating it as such would misprice the offer.
+   */
+  currencyMismatch: boolean;
 }
 
 /** A posted price this far from the table's own percent norms deserves a flag. */
@@ -169,15 +182,29 @@ export function resolveOffer(
   meltValue: number,
   grossGrams: number,
   fallbackRate: number,
+  /** The currency the offer will be paid in. Omit to skip the check. */
+  currency?: CurrencyCode,
 ): ResolvedOffer {
   const resolved = resolveRate(rules, query, fallbackRate);
   const rule = resolved.rule;
-  const mode = rule ? ruleMode(rule) : 'percent';
+  const declaredMode = rule ? ruleMode(rule) : 'percent';
+
+  // A posted price carries a currency; a percentage does not. If the display
+  // currency has moved on, refuse the posted number rather than reinterpreting
+  // it — falling back to the percentage default is wrong by a margin, whereas
+  // treating euros as dollars is wrong by the exchange rate.
+  const currencyMismatch =
+    declaredMode === 'perGram' &&
+    !!currency &&
+    !!rule?.currency &&
+    rule.currency !== currency;
+
+  const mode: RateMode = currencyMismatch ? 'percent' : declaredMode;
 
   const payout =
     mode === 'perGram' && rule
       ? Math.max(0, rule.perGram ?? 0) * Math.max(0, grossGrams)
-      : meltValue * resolved.rate;
+      : meltValue * (currencyMismatch ? Math.min(1, Math.max(0, fallbackRate)) : resolved.rate);
 
   const impliedRate = meltValue > 0 ? payout / meltValue : 0;
 
@@ -187,12 +214,15 @@ export function resolveOffer(
     perGram: grossGrams > 0 ? payout / grossGrams : 0,
     mode,
     rule,
-    reason: resolved.reason,
+    reason: currencyMismatch
+      ? `Posted price is in ${rule?.currency} — using your default rate instead`
+      : resolved.reason,
     // Only meaningful for posted prices; a percentage rule cannot drift.
     stale:
       mode === 'perGram' &&
       meltValue > 0 &&
       (impliedRate < STALE_LOW || impliedRate > STALE_HIGH),
+    currencyMismatch,
   };
 }
 

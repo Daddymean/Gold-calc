@@ -13,9 +13,38 @@ import {
 } from '@/lib/refining';
 import { money, parseNumber, percent, shortDate, signedPercent } from '@/lib/format';
 import { confirm } from '@/lib/confirm';
+import { itemsUnderHold } from '@/lib/retention';
 import { uid } from '@/lib/storage';
 import { Badge, Button, Card, Divider, Input, SectionLabel, StatRow } from '@/components/ui';
 import { colors, radius, spacing, type } from '@/theme';
+
+/** The settlement form's fields, exactly as typed. */
+interface LineDraft {
+  id: string;
+  metal: AssayLine['metal'];
+  grossGrams: string;
+  assayFineness: string;
+  payableRate: string;
+  pricePerTroyOz: string;
+}
+
+const toDraft = (line: AssayLine): LineDraft => ({
+  id: line.id,
+  metal: line.metal,
+  grossGrams: line.grossGrams ? String(Number(line.grossGrams.toFixed(3))) : '',
+  assayFineness: String(line.assayFineness),
+  payableRate: String(line.payableRate),
+  pricePerTroyOz: line.pricePerTroyOz ? String(Number(line.pricePerTroyOz.toFixed(2))) : '',
+});
+
+const parseDraft = (draft: LineDraft): AssayLine => ({
+  id: draft.id,
+  metal: draft.metal,
+  grossGrams: parseNumber(draft.grossGrams),
+  assayFineness: parseNumber(draft.assayFineness),
+  payableRate: parseNumber(draft.payableRate),
+  pricePerTroyOz: parseNumber(draft.pricePerTroyOz),
+});
 
 export default function LotDetailScreen() {
   const router = useRouter();
@@ -32,7 +61,13 @@ export default function LotDetailScreen() {
   );
   const expected = useMemo(() => calculateExpectedContent(lotItems), [lotItems]);
 
-  const [lines, setLines] = useState<AssayLine[] | null>(null);
+  // Held as text, not numbers.
+  //
+  // Binding a numeric field's value to String(parse(input)) makes decimals
+  // impossible to type: "0." parses to 0 and renders back as "0", eating the
+  // separator, so an assay of 0.585 can never be entered. Drafts stay as the
+  // operator typed them and are parsed once, on submit.
+  const [lines, setLines] = useState<LineDraft[] | null>(null);
   const [fees, setFees] = useState({ refining: '', assay: '', shipping: '', other: '' });
   const [saving, setSaving] = useState(false);
 
@@ -45,7 +80,9 @@ export default function LotDetailScreen() {
     );
   }
 
-  const editableLines = lines ?? lot.assayLines;
+  const editableLines: AssayLine[] = lines
+    ? lines.map(parseDraft)
+    : lot.assayLines;
   const feeValues = {
     refining: parseNumber(fees.refining),
     assay: parseNumber(fees.assay),
@@ -62,14 +99,29 @@ export default function LotDetailScreen() {
   const variance = calculateVariance(expected, result);
 
   const startSettlement = () =>
-    setLines(suggestAssayLines(expected, spot, uid));
+    setLines(suggestAssayLines(expected, spot, uid).map(toDraft));
 
-  const patchLine = (lineId: string, patch: Partial<AssayLine>) =>
+  const patchLine = (lineId: string, patch: Partial<LineDraft>) =>
     setLines((prev) =>
       (prev ?? []).map((line) => (line.id === lineId ? { ...line, ...patch } : line)),
     );
 
   const doSend = async () => {
+    // The item screen already refuses to melt stock inside the hold period.
+    // Sending a lot melts everything in it, so the same rule has to apply here
+    // or a lot becomes a way around the compliance hold without ever seeing it.
+    const held = itemsUnderHold(lotItems, settings.holdPeriodDays);
+    if (held.length) {
+      const ok = await confirm({
+        title: 'Still inside the hold period',
+        message: `${held.length} item${held.length === 1 ? '' : 's'} in this lot ${held.length === 1 ? 'has' : 'have'} not cleared your ${settings.holdPeriodDays}-day hold. Sending the lot marks them melted.`,
+        confirmLabel: 'Send anyway',
+        cancelLabel: 'Keep holding',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+
     const ok = await confirm({
       title: `Send ${lot.reference} to the refiner?`,
       message: `${lotItems.length} item${lotItems.length === 1 ? '' : 's'} will be marked melted and leave your stock. The lot's cost basis is locked at this point.`,
@@ -212,16 +264,16 @@ export default function LotDetailScreen() {
                       <Input
                         containerStyle={{ flex: 1 }}
                         label="Gross received"
-                        value={String(line.grossGrams)}
-                        onChangeText={(t) => patchLine(line.id, { grossGrams: parseNumber(t) })}
+                        value={line.grossGrams}
+                        onChangeText={(t) => patchLine(line.id, { grossGrams: t })}
                         keyboardType="decimal-pad"
                         suffix="g"
                       />
                       <Input
                         containerStyle={{ flex: 1 }}
                         label="Assay"
-                        value={String(line.assayFineness)}
-                        onChangeText={(t) => patchLine(line.id, { assayFineness: parseNumber(t) })}
+                        value={line.assayFineness}
+                        onChangeText={(t) => patchLine(line.id, { assayFineness: t })}
                         keyboardType="decimal-pad"
                         hint="0–1, e.g. 0.585"
                       />
@@ -232,16 +284,16 @@ export default function LotDetailScreen() {
                       <Input
                         containerStyle={{ flex: 1 }}
                         label="Payable"
-                        value={String(line.payableRate)}
-                        onChangeText={(t) => patchLine(line.id, { payableRate: parseNumber(t) })}
+                        value={line.payableRate}
+                        onChangeText={(t) => patchLine(line.id, { payableRate: t })}
                         keyboardType="decimal-pad"
                         hint="0–1, e.g. 0.97"
                       />
                       <Input
                         containerStyle={{ flex: 1 }}
                         label="Settlement price"
-                        value={String(line.pricePerTroyOz)}
-                        onChangeText={(t) => patchLine(line.id, { pricePerTroyOz: parseNumber(t) })}
+                        value={line.pricePerTroyOz}
+                        onChangeText={(t) => patchLine(line.id, { pricePerTroyOz: t })}
                         keyboardType="decimal-pad"
                         prefix="$"
                         hint="per troy oz"

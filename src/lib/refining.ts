@@ -221,6 +221,27 @@ export function calculateVariance(
   });
 }
 
+/**
+ * Item ids already committed to a lot that has not settled.
+ *
+ * An item must not sit in two lots at once: both could be sent and settled,
+ * and the same purchase price would be counted against two different refining
+ * results. Settled lots are excluded because they are history — their items
+ * are gone and cannot be re-committed anyway.
+ */
+export function activeLotItemIds(
+  lots: { id: string; status: LotStatus; itemIds: string[] }[],
+  excludeLotId?: string,
+): Set<string> {
+  const reserved = new Set<string>();
+  for (const lot of lots) {
+    if (lot.status === 'settled') continue;
+    if (excludeLotId && lot.id === excludeLotId) continue;
+    for (const id of lot.itemIds) reserved.add(id);
+  }
+  return reserved;
+}
+
 /* --------------------------------------------------------------- roll-ups */
 
 export interface SettledLotLike {
