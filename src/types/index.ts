@@ -5,6 +5,7 @@ import type { CurrencyCode } from '@/lib/format';
 export type { MetalSymbol, WeightUnit } from '@/lib/metals';
 export type { CurrencyCode } from '@/lib/format';
 export type { BuyRule } from '@/lib/buyTable';
+export type { AssayLine, LotFees, LotStatus } from '@/lib/refining';
 
 /** How the item came through the door. Drives compliance prompts and reporting. */
 export type TransactionType = 'purchase' | 'consignment' | 'trade' | 'sale';
@@ -74,6 +75,35 @@ export interface InventoryItem {
   purchasedAt: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A parcel of scrap sent to a refiner.
+ *
+ * Items leave the shelf as a lot and come back as money weeks later. Until the
+ * refiner reports, the profit on everything in here is unknown — which is why
+ * the lot carries its own frozen cost basis rather than recomputing from items
+ * that may since have been edited.
+ */
+export interface MeltLot {
+  id: string;
+  /** Human-facing reference, e.g. "L-0007". */
+  reference: string;
+  refinerName: string;
+  itemIds: string[];
+  status: import('@/lib/refining').LotStatus;
+
+  /** What the items cost at the counter, frozen when the lot is sent. */
+  costBasis: number;
+  currency: import('@/lib/format').CurrencyCode;
+
+  assayLines: import('@/lib/refining').AssayLine[];
+  fees: import('@/lib/refining').LotFees;
+
+  notes?: string;
+  createdAt: string;
+  sentAt?: string;
+  settledAt?: string;
 }
 
 export interface Settings {

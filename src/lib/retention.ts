@@ -33,3 +33,35 @@ export function expiredIdPhotoOwners(
     })
     .map((customer) => customer.id);
 }
+
+
+export interface HeldItem {
+  id: string;
+  purchasedAt: string;
+  status: string;
+}
+
+/**
+ * Items that a configured hold period says cannot be melted yet.
+ *
+ * The item screen already warns before melting one early; the refining flow
+ * has to apply the same rule, or a lot becomes a way to melt held stock
+ * without ever seeing the warning.
+ */
+export function itemsUnderHold(
+  items: HeldItem[],
+  holdPeriodDays: number,
+  now: number = Date.now(),
+): string[] {
+  if (holdPeriodDays <= 0) return [];
+  const cutoff = now - holdPeriodDays * 86_400_000;
+
+  return items
+    .filter((item) => {
+      if (item.status === 'sold' || item.status === 'melted') return false;
+      const bought = new Date(item.purchasedAt).getTime();
+      // An unparseable purchase date cannot be shown to have cleared the hold.
+      return Number.isNaN(bought) || bought > cutoff;
+    })
+    .map((item) => item.id);
+}

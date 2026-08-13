@@ -1,6 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decryptString, destroyMasterKey, encryptString, isEnvelope } from '@/lib/crypto';
-import type { BuyRule, Customer, InventoryItem, PriceHistory, Settings, SpotQuote } from '@/types';
+import type {
+  BuyRule,
+  Customer,
+  InventoryItem,
+  MeltLot,
+  PriceHistory,
+  Settings,
+  SpotQuote,
+} from '@/types';
 
 /**
  * Everything lives on the device, sealed with the device's master key. A
@@ -18,11 +26,13 @@ const KEYS = {
   quotes: 'bb:quotes:v1',
   history: 'bb:history:v1',
   buyRules: 'bb:buyRules:v1',
+  lots: 'bb:lots:v1',
   ticketSeq: 'bb:ticketSeq:v1',
+  lotSeq: 'bb:lotSeq:v1',
 } as const;
 
 /** Values that are neither sensitive nor worth the round trip to seal. */
-const UNENCRYPTED_KEYS: string[] = [KEYS.ticketSeq];
+const UNENCRYPTED_KEYS: string[] = [KEYS.ticketSeq, KEYS.lotSeq];
 
 export const DEFAULT_SETTINGS: Settings = {
   currency: 'USD',
@@ -107,6 +117,9 @@ export const storage = {
   loadBuyRules: () => readJson<BuyRule[]>(KEYS.buyRules, []),
   saveBuyRules: (rules: BuyRule[]) => writeJson(KEYS.buyRules, rules),
 
+  loadLots: () => readJson<MeltLot[]>(KEYS.lots, []),
+  saveLots: (lots: MeltLot[]) => writeJson(KEYS.lots, lots),
+
   async loadSettings(): Promise<Settings> {
     const stored = await readJson<Partial<Settings>>(KEYS.settings, {});
     // Merge so a settings field added in a later version gets its default
@@ -123,10 +136,12 @@ export const storage = {
 
   /** Monotonic ticket numbers so two items never share a counter reference. */
   async nextTicket(): Promise<string> {
-    const raw = await AsyncStorage.getItem(KEYS.ticketSeq);
-    const next = (Number.parseInt(raw ?? '0', 10) || 0) + 1;
-    await AsyncStorage.setItem(KEYS.ticketSeq, String(next));
-    return `T-${String(next).padStart(4, '0')}`;
+    return nextSequence(KEYS.ticketSeq, 'T');
+  },
+
+  /** Lot references share the same monotonic scheme as tickets. */
+  async nextLotReference(): Promise<string> {
+    return nextSequence(KEYS.lotSeq, 'L');
   },
 
   /**
@@ -139,6 +154,13 @@ export const storage = {
     writesBlocked = false;
   },
 };
+
+async function nextSequence(key: string, prefix: string): Promise<string> {
+  const raw = await AsyncStorage.getItem(key);
+  const next = (Number.parseInt(raw ?? '0', 10) || 0) + 1;
+  await AsyncStorage.setItem(key, String(next));
+  return `${prefix}-${String(next).padStart(4, '0')}`;
+}
 
 /** RFC4122-ish id. Good enough for local records; no crypto dependency needed. */
 export function uid(): string {

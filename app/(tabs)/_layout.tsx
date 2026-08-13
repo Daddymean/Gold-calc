@@ -1,10 +1,12 @@
 import React from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 import { colors } from '@/theme';
 
 export default function TabsLayout() {
+  const router = useRouter();
+
   return (
     <Tabs
       screenOptions={{
@@ -42,6 +44,19 @@ export default function TabsLayout() {
         options={{
           title: 'Inventory',
           tabBarIcon: ({ color, size }) => <Ionicons name="cube" color={color} size={size} />,
+          // Refining lives one tap off inventory rather than as a sixth tab: it
+          // is where stock goes, and the tab bar is already full.
+          headerRight: () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Refining lots"
+              onPress={() => router.push('/lots')}
+              hitSlop={8}
+              style={({ pressed }) => [{ paddingHorizontal: 16 }, pressed && { opacity: 0.6 }]}
+            >
+              <Text style={{ color: colors.gold, fontWeight: '600', fontSize: 15 }}>Lots</Text>
+            </Pressable>
+          ),
         }}
       />
       <Tabs.Screen

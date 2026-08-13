@@ -43,3 +43,36 @@ test('an unparseable capture date is treated as expired', () => {
 test('an empty book sweeps nothing', () => {
   assert.deepEqual(expiredIdPhotoOwners([], 30, NOW), []);
 });
+
+/* ------------------------------------------------------------ hold period */
+
+import { itemsUnderHold } from '../src/lib/retention.ts';
+
+const stock = (id: string, daysAgo: number, status = 'in_stock') => ({
+  id,
+  purchasedAt: new Date(NOW - daysAgo * DAY).toISOString(),
+  status,
+});
+
+test('no hold period holds nothing', () => {
+  assert.deepEqual(itemsUnderHold([stock('a', 1)], 0, NOW), []);
+});
+
+test('items bought inside the window are held', () => {
+  const items = [stock('fresh', 3), stock('old', 40)];
+  assert.deepEqual(itemsUnderHold(items, 30, NOW), ['fresh']);
+});
+
+test('sold and melted items are past holding', () => {
+  const items = [stock('sold', 1, 'sold'), stock('melted', 1, 'melted'), stock('held', 1)];
+  assert.deepEqual(itemsUnderHold(items, 30, NOW), ['held']);
+});
+
+test('an item exactly at the cutoff has cleared the hold', () => {
+  assert.deepEqual(itemsUnderHold([stock('edge', 30)], 30, NOW), []);
+});
+
+test('an unparseable purchase date cannot be shown to have cleared', () => {
+  const broken = [{ id: 'x', purchasedAt: 'not a date', status: 'in_stock' }];
+  assert.deepEqual(itemsUnderHold(broken, 30, NOW), ['x']);
+});
