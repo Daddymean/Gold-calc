@@ -1,0 +1,40 @@
+name: CI
+
+# Runs on pull requests so a branch is verified BEFORE it reaches main.
+# The deploy workflow also typechecks and tests, but that fires on push to
+# main — after a merge has already published the demo. This is the gate.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.6+ required: the test runner uses --experimental-strip-types to
+          # execute the TypeScript sources directly.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Check the web build still bundles
+        env:
+          EXPO_PUBLIC_BASE_URL: /${{ github.event.repository.name }}
+          EXPO_PUBLIC_DEMO: '1'
+        run: npx expo export -p web --output-dir dist
