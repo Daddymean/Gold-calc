@@ -186,3 +186,104 @@ test('every weight resolves against the starter table', () => {
     assert.notEqual(resolved.rule, null, `no gold rule matched ${weight} g`);
   }
 });
+
+/* ------------------------------------------------------------- per-gram */
+
+import { resolveOffer, ruleMode } from '../src/lib/buyTable.ts';
+import { TROY_OUNCE_IN_GRAMS } from '../src/lib/metals.ts';
+
+const close = (actual: number, expected: number, tolerance = 1e-6) =>
+  assert.ok(
+    Math.abs(actual - expected) <= tolerance,
+    `expected ${actual} to be within ${tolerance} of ${expected}`,
+  );
+
+test('a rule with no mode is treated as percent, so old tables keep working', () => {
+  const legacy = rule({ rate: 0.8 });
+  assert.equal(ruleMode(legacy), 'percent');
+
+  const offer = resolveOffer(
+    [legacy],
+    { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' },
+    1000,
+    10,
+    0.5,
+  );
+  assert.equal(offer.payout, 800);
+  assert.equal(offer.mode, 'percent');
+});
+
+test('a per-gram rule pays the posted rate times the gross weight', () => {
+  const posted = rule({ mode: 'perGram', perGram: 42 });
+  const offer = resolveOffer(
+    [posted],
+    { metal: 'XAU', purityId: 'au-14', weight: 18.4, unit: 'g' },
+    774.79,
+    18.4,
+    0.5,
+  );
+  close(offer.payout, 42 * 18.4, 1e-9);
+  close(offer.perGram, 42, 1e-9);
+  assert.equal(offer.mode, 'perGram');
+});
+
+test('a posted price reports the percentage of melt it currently works out to', () => {
+  // $42/g against a melt of $774.79 on 18.4 g is a shade under 100%.
+  const posted = rule({ mode: 'perGram', perGram: 30 });
+  const offer = resolveOffer(
+    [posted],
+    { metal: 'XAU', purityId: 'au-14', weight: 18.4, unit: 'g' },
+    774.79,
+    18.4,
+    0.5,
+  );
+  close(offer.impliedRate, (30 * 18.4) / 774.79, 1e-9);
+});
+
+test('a posted price that has drifted away from spot is flagged stale', () => {
+  const query = { metal: 'XAU' as const, purityId: 'au-14', weight: 10, unit: 'g' as const };
+
+  // Paying almost the whole melt value: no margin left.
+  const tooHigh = resolveOffer([rule({ mode: 'perGram', perGram: 99 })], query, 1000, 10, 0.5);
+  assert.ok(tooHigh.stale);
+
+  // Paying a fraction of melt: nobody sells at this.
+  const tooLow = resolveOffer([rule({ mode: 'perGram', perGram: 10 })], query, 1000, 10, 0.5);
+  assert.ok(tooLow.stale);
+
+  const sensible = resolveOffer([rule({ mode: 'perGram', perGram: 75 })], query, 1000, 10, 0.5);
+  assert.ok(!sensible.stale);
+});
+
+test('a percentage rule is never flagged stale, because it cannot drift', () => {
+  const query = { metal: 'XAU' as const, purityId: 'au-14', weight: 10, unit: 'g' as const };
+  const offer = resolveOffer([rule({ rate: 0.99 })], query, 1000, 10, 0.5);
+  assert.ok(!offer.stale);
+});
+
+test('per-gram pricing is on the item as presented, not on pure content', () => {
+  // A 14K piece priced at $40/g pays $40 for each gram of 14K, which is the
+  // number a counter posts — not $40 per gram of contained gold.
+  const offer = resolveOffer(
+    [rule({ mode: 'perGram', perGram: 40, purityId: 'au-14' })],
+    { metal: 'XAU', purityId: 'au-14', weight: 20, unit: 'g' },
+    (20 * (14 / 24) * 2400) / TROY_OUNCE_IN_GRAMS,
+    20,
+    0.5,
+  );
+  close(offer.payout, 800, 1e-9);
+});
+
+test('an unmatched query falls back to the default percentage', () => {
+  const offer = resolveOffer([], { metal: 'XAU', purityId: 'au-14', weight: 10, unit: 'g' }, 1000, 10, 0.8);
+  assert.equal(offer.payout, 800);
+  assert.equal(offer.rule, null);
+  assert.equal(offer.mode, 'percent');
+});
+
+test('a zero-weight query cannot divide by zero', () => {
+  const offer = resolveOffer([rule({ mode: 'perGram', perGram: 40 })], { metal: 'XAU', purityId: 'au-14', weight: 0, unit: 'g' }, 0, 0, 0.8);
+  assert.equal(offer.payout, 0);
+  assert.equal(offer.perGram, 0);
+  assert.equal(offer.impliedRate, 0);
+});

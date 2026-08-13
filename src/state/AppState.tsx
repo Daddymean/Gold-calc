@@ -11,14 +11,16 @@ import { AppState as RNAppState } from 'react-native';
 import { getProvider, type ProviderId } from '@/lib/spot';
 import { METAL_ORDER } from '@/lib/metals';
 import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/storage';
-import { resolveRate, type RateQuery, type ResolvedRate } from '@/lib/buyTable';
+import { resolveOffer, type RateQuery, type ResolvedOffer } from '@/lib/buyTable';
 import { deletePhoto } from '@/lib/photos';
 import { expiredIdPhotoOwners } from '@/lib/retention';
+import { calculateExpectedContent, NO_FEES, type AssayLine, type LotFees } from '@/lib/refining';
 import { buildDemoBook } from '@/lib/demo';
 import { IS_DEMO } from '@/lib/demoMode';
 import type {
   BuyRule,
   Customer,
+  MeltLot,
   HistoryRange,
   InventoryItem,
   MetalSymbol,
@@ -68,10 +70,23 @@ interface AppStateValue {
   loadHistory: (metal: MetalSymbol, range: HistoryRange) => Promise<PriceHistory | null>;
   historyLoading: boolean;
 
+  lots: MeltLot[];
+  getLot: (id: string) => MeltLot | undefined;
+  createLot: (itemIds: string[], refinerName: string) => Promise<MeltLot>;
+  updateLot: (id: string, patch: Partial<MeltLot>) => Promise<void>;
+  deleteLot: (id: string) => Promise<void>;
+  /** Moves a lot to 'sent' and marks its items melted in one step. */
+  sendLot: (id: string) => Promise<void>;
+  settleLot: (id: string, assayLines: AssayLine[], fees: LotFees) => Promise<void>;
+
   buyRules: BuyRule[];
   saveBuyRules: (rules: BuyRule[]) => Promise<void>;
-  /** Resolves the payout rate for a piece, honouring the useBuyTable setting. */
-  rateFor: (query: RateQuery) => ResolvedRate;
+  /**
+   * Resolves what to pay for a piece, honouring the useBuyTable setting.
+   * Needs the melt value and gross weight because a rule may price either as a
+   * percentage of melt or as a posted per-gram rate.
+   */
+  offerFor: (query: RateQuery, meltValue: number, grossGrams: number) => ResolvedOffer;
 
   resetAll: () => Promise<void>;
 }
@@ -106,6 +121,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [history, setHistory] = useState<Record<string, PriceHistory>>({});
   const [historyLoading, setHistoryLoading] = useState(false);
   const [buyRules, setBuyRules] = useState<BuyRule[]>([]);
+  const [lots, setLots] = useState<MeltLot[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
 
   // Kept in a ref so the refresh timer and app-foreground handler always read
@@ -124,16 +140,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       let loadedItems: InventoryItem[];
       let loadedCustomers: Customer[];
       let loadedRules: BuyRule[];
+      let loadedLots: MeltLot[];
       let cachedQuotes: SpotQuote[];
       let cachedHistory: Record<string, PriceHistory>;
 
       try {
-        [loadedSettings, loadedItems, loadedCustomers, loadedRules, cachedQuotes, cachedHistory] =
-          await Promise.all([
+        [
+          loadedSettings,
+          loadedItems,
+          loadedCustomers,
+          loadedRules,
+          loadedLots,
+          cachedQuotes,
+          cachedHistory,
+        ] = await Promise.all([
             storage.loadSettings(),
             storage.loadItems(),
             storage.loadCustomers(),
             storage.loadBuyRules(),
+            storage.loadLots(),
             storage.loadQuotes(),
             storage.loadHistory(),
           ]);
@@ -173,6 +198,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setItems(loadedItems);
       setCustomers(loadedCustomers);
       setBuyRules(loadedRules);
+      setLots(loadedLots);
       // Merge rather than replace: a screen can mount and fetch its own series
       // before these reads resolve, and a plain assignment would throw that
       // fresher data away. Anything already in state wins over the cache.
@@ -387,6 +413,100 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [customers, persistCustomers],
   );
 
+  /* ------------------------------------------------------------ melt lots */
+
+  const persistLots = useCallback(async (next: MeltLot[]) => {
+    setLots(next);
+    await storage.saveLots(next);
+  }, []);
+
+  const createLot: AppStateValue['createLot'] = useCallback(
+    async (itemIds, refinerName) => {
+      const chosen = items.filter((item) => itemIds.includes(item.id));
+      const lot: MeltLot = {
+        id: uid(),
+        reference: await storage.nextLotReference(),
+        refinerName: refinerName.trim(),
+        itemIds,
+        status: 'open',
+        // Frozen now: the lot's profit must be measured against what these
+        // items actually cost, even if an item is edited or deleted later.
+        costBasis: calculateExpectedContent(chosen).costBasis,
+        currency: settingsRef.current.currency,
+        assayLines: [],
+        fees: { ...NO_FEES },
+        createdAt: new Date().toISOString(),
+      };
+      await persistLots([lot, ...lots]);
+      return lot;
+    },
+    [items, lots, persistLots],
+  );
+
+  const updateLot: AppStateValue['updateLot'] = useCallback(
+    async (id, patch) => {
+      await persistLots(lots.map((lot) => (lot.id === id ? { ...lot, ...patch } : lot)));
+    },
+    [lots, persistLots],
+  );
+
+  const deleteLot: AppStateValue['deleteLot'] = useCallback(
+    async (id) => {
+      const lot = lots.find((l) => l.id === id);
+      await persistLots(lots.filter((l) => l.id !== id));
+      // Deleting a lot that was already sent puts its items back on the shelf,
+      // rather than leaving them marked melted with nothing to account for them.
+      if (lot && lot.status !== 'open') {
+        await persistItems(
+          items.map((item) =>
+            lot.itemIds.includes(item.id) && item.status === 'melted'
+              ? { ...item, status: 'in_stock', updatedAt: new Date().toISOString() }
+              : item,
+          ),
+        );
+      }
+    },
+    [lots, items, persistLots, persistItems],
+  );
+
+  const sendLot: AppStateValue['sendLot'] = useCallback(
+    async (id) => {
+      const lot = lots.find((l) => l.id === id);
+      if (!lot) return;
+      const now = new Date().toISOString();
+
+      // Recompute the basis at send time: the lot's contents can change while
+      // it is still open, and this is the moment it stops being editable.
+      const chosen = items.filter((item) => lot.itemIds.includes(item.id));
+      await persistLots(
+        lots.map((l) =>
+          l.id === id
+            ? { ...l, status: 'sent', sentAt: now, costBasis: calculateExpectedContent(chosen).costBasis }
+            : l,
+        ),
+      );
+      await persistItems(
+        items.map((item) =>
+          lot.itemIds.includes(item.id) ? { ...item, status: 'melted', updatedAt: now } : item,
+        ),
+      );
+    },
+    [lots, items, persistLots, persistItems],
+  );
+
+  const settleLot: AppStateValue['settleLot'] = useCallback(
+    async (id, assayLines, fees) => {
+      await persistLots(
+        lots.map((lot) =>
+          lot.id === id
+            ? { ...lot, status: 'settled', assayLines, fees, settledAt: new Date().toISOString() }
+            : lot,
+        ),
+      );
+    },
+    [lots, persistLots],
+  );
+
   const saveBuyRules: AppStateValue['saveBuyRules'] = useCallback(async (rules) => {
     setBuyRules(rules);
     await storage.saveBuyRules(rules);
@@ -395,11 +515,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // Reads settings directly rather than through the ref: a screen memoising on
   // rateFor must recompute when the toggle or the default rate changes, and a
   // ref read would leave it quoting the old number.
-  const rateFor: AppStateValue['rateFor'] = useCallback(
-    (query) =>
+  const offerFor: AppStateValue['offerFor'] = useCallback(
+    (query, meltValue, grossGrams) =>
       // Turning the table off behaves exactly as if it were empty, so the
       // toggle never leaves a stale rule quietly influencing a quote.
-      resolveRate(settings.useBuyTable ? buyRules : [], query, settings.defaultPayoutRate),
+      resolveOffer(
+        settings.useBuyTable ? buyRules : [],
+        query,
+        meltValue,
+        grossGrams,
+        settings.defaultPayoutRate,
+      ),
     [buyRules, settings.useBuyTable, settings.defaultPayoutRate],
   );
 
@@ -423,6 +549,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     await storage.clearAll();
     setVaultError(null);
     setBuyRules([]);
+    setLots([]);
     setItems([]);
     setCustomers([]);
     setSettings(DEFAULT_SETTINGS);
@@ -456,9 +583,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       history,
       loadHistory,
       historyLoading,
+      lots,
+      getLot: (id) => lots.find((l) => l.id === id),
+      createLot,
+      updateLot,
+      deleteLot,
+      sendLot,
+      settleLot,
       buyRules,
       saveBuyRules,
-      rateFor,
+      offerFor,
       resetAll,
     }),
     [
@@ -482,9 +616,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       history,
       loadHistory,
       historyLoading,
+      lots,
+      createLot,
+      updateLot,
+      deleteLot,
+      sendLot,
+      settleLot,
       buyRules,
       saveBuyRules,
-      rateFor,
+      offerFor,
       resetAll,
     ],
   );

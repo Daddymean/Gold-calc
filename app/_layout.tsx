@@ -36,6 +36,9 @@ export default function RootLayout() {
               <Stack.Screen name="customer/[id]" options={{ title: 'Customer' }} />
               <Stack.Screen name="metal/[symbol]" options={{ title: 'Price history' }} />
               <Stack.Screen name="settings/buy-table" options={{ title: 'Buy table' }} />
+              <Stack.Screen name="lots/index" options={{ title: 'Refining lots' }} />
+              <Stack.Screen name="lots/new" options={{ title: 'Build a lot', presentation: 'modal' }} />
+              <Stack.Screen name="lots/[id]" options={{ title: 'Lot' }} />
             </Stack>
           </AppGate>
         </AppStateProvider>

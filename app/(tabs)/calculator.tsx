@@ -32,7 +32,7 @@ import { uid } from '@/lib/storage';
 export default function CalculatorScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { settings, rateFor } = useApp();
+  const { settings, offerFor } = useApp();
   const spot = useSpot();
 
   const [metal, setMetal] = useState<MetalSymbol>(settings.defaultMetal);
@@ -47,13 +47,32 @@ export default function CalculatorScreen() {
   const purity = findPurity(purityId);
   const spotPrice = spot[metal] ?? 0;
 
-  // The table sets the rate as metal, karat and weight change; typing in the
-  // percentage field pins it until the operator clears the override.
-  const tableRate = useMemo(
-    () => rateFor({ metal, purityId, weight: parseNumber(weightText), unit }),
-    [rateFor, metal, purityId, weightText, unit],
+  // Melt first, because a per-gram rule needs the gross weight and a percentage
+  // rule needs the melt value; the table then decides which basis applies.
+  const meltOnly = useMemo(
+    () =>
+      calculateMelt({
+        spotPerTroyOz: spotPrice,
+        weight: parseNumber(weightText),
+        unit,
+        fineness: purity?.fineness ?? 0,
+        payoutRate: 1,
+      }),
+    [spotPrice, weightText, unit, purity?.fineness],
   );
-  const payoutText = payoutOverride ?? String(Math.round(tableRate.rate * 100));
+
+  const tableOffer = useMemo(
+    () =>
+      offerFor(
+        { metal, purityId, weight: parseNumber(weightText), unit },
+        meltOnly.meltValue,
+        meltOnly.grams,
+      ),
+    [offerFor, metal, purityId, weightText, unit, meltOnly.meltValue, meltOnly.grams],
+  );
+
+  // Typing in the percentage field pins the rate until the operator clears it.
+  const payoutText = payoutOverride ?? String(Math.round(tableOffer.impliedRate * 100));
   const payoutRate = parseNumber(payoutText) / 100;
 
   const result = useMemo(
@@ -71,7 +90,11 @@ export default function CalculatorScreen() {
   // Typing an offer flips the relationship: the percentage becomes the derived
   // value so a buyer can quote a round number and see what it costs them.
   const offer = parseNumber(offerText);
-  const effectiveOffer = offerLocked && offer > 0 ? offer : result.payout;
+  const effectiveOffer = offerLocked && offer > 0
+    ? offer
+    : payoutOverride !== null
+      ? result.payout
+      : tableOffer.payout;
   const effectiveRate = result.meltValue > 0 ? effectiveOffer / result.meltValue : 0;
   const margin = result.meltValue - effectiveOffer;
 
@@ -227,9 +250,25 @@ export default function CalculatorScreen() {
             </Text>
           ) : (
             settings.useBuyTable && (
-              <Text style={styles.offerNote}>
-                {tableRate.rule ? `Buy table · ${tableRate.reason}` : tableRate.reason}
-              </Text>
+              <View>
+                <Text style={styles.offerNote}>
+                  {tableOffer.rule
+                    ? `Buy table · ${tableOffer.reason}${
+                        tableOffer.mode === 'perGram'
+                          ? ` · ${money(tableOffer.perGram, settings.currency)}/g posted`
+                          : ''
+                      }`
+                    : tableOffer.reason}
+                </Text>
+                {tableOffer.stale && (
+                  <View style={styles.staleRow}>
+                    <Badge label="POSTED PRICE HAS DRIFTED" tone="warn" />
+                    <Text style={styles.staleText}>
+                      That works out to {percent(tableOffer.impliedRate)} of melt at today's spot.
+                    </Text>
+                  </View>
+                )}
+              </View>
             )
           )}
         </View>
@@ -388,6 +427,8 @@ const styles = StyleSheet.create({
 
   offerRow: { flexDirection: 'row', gap: spacing.md },
   offerNote: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+  staleRow: { gap: spacing.xs, marginTop: spacing.sm },
+  staleText: { ...type.caption, color: colors.warn, lineHeight: 16 },
   link: { color: colors.gold, fontWeight: '700' },
 
   resultCard: { marginTop: spacing.lg },

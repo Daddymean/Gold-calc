@@ -12,8 +12,15 @@ import { confirm } from '@/lib/confirm';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/state/AppState';
 import { METALS, METAL_ORDER, findPurity, puritiesFor, type MetalSymbol } from '@/lib/metals';
-import { findOverlaps, rulesForMetal, starterRules, type BuyRule } from '@/lib/buyTable';
-import { parseNumber, percent } from '@/lib/format';
+import {
+  findOverlaps,
+  ruleMode,
+  rulesForMetal,
+  starterRules,
+  type BuyRule,
+  type RateMode,
+} from '@/lib/buyTable';
+import { money, parseNumber, percent } from '@/lib/format';
 import { uid } from '@/lib/storage';
 import { Badge, Button, Card, Divider, Input, SectionLabel, Segmented } from '@/components/ui';
 import { colors, radius, spacing, type } from '@/theme';
@@ -142,7 +149,16 @@ export default function BuyTableScreen() {
                       </View>
                     )}
                   </View>
-                  <Text style={styles.ruleRate}>{percent(rule.rate, 0)}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={styles.ruleRate}>
+                      {ruleMode(rule) === 'perGram'
+                        ? `${money(rule.perGram ?? 0, settings.currency)}/g`
+                        : percent(rule.rate, 0)}
+                    </Text>
+                    <Text style={styles.ruleMode}>
+                      {ruleMode(rule) === 'perGram' ? 'posted' : 'of melt'}
+                    </Text>
+                  </View>
                 </Pressable>
               </View>
             ))}
@@ -162,7 +178,9 @@ export default function BuyTableScreen() {
               purityId: null,
               minGrams: 0,
               maxGrams: null,
+              mode: 'percent',
               rate: settings.defaultPayoutRate,
+              perGram: 0,
             })
           }
         />
@@ -193,18 +211,23 @@ function RuleEditor({
   const [purityId, setPurityId] = useState<string>(rule.purityId ?? 'any');
   const [minText, setMinText] = useState(String(rule.minGrams));
   const [maxText, setMaxText] = useState(rule.maxGrams == null ? '' : String(rule.maxGrams));
+  const [mode, setMode] = useState<RateMode>(ruleMode(rule));
   const [rateText, setRateText] = useState(String(Math.round(rule.rate * 100)));
+  const [perGramText, setPerGramText] = useState(rule.perGram ? String(rule.perGram) : '');
 
   const minGrams = Math.max(0, parseNumber(minText));
   const maxGrams = maxText.trim() ? Math.max(0, parseNumber(maxText)) : null;
   const rate = parseNumber(rateText) / 100;
+  const perGram = parseNumber(perGramText);
 
   const problem =
     maxGrams !== null && maxGrams <= minGrams
       ? 'The upper bound has to be above the lower one.'
-      : rate <= 0 || rate > 1
+      : mode === 'percent' && (rate <= 0 || rate > 1)
         ? 'A payout rate has to be between 1 and 100 percent.'
-        : null;
+        : mode === 'perGram' && perGram <= 0
+          ? 'Enter the posted price per gram.'
+          : null;
 
   return (
     <KeyboardAvoidingView
@@ -268,13 +291,39 @@ function RuleEditor({
 
         <View style={styles.section}>
           <SectionLabel>Payout</SectionLabel>
-          <Input
-            label="Percent of melt"
-            value={rateText}
-            onChangeText={setRateText}
-            keyboardType="number-pad"
-            suffix="%"
+          <Segmented
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: 'percent', label: 'Percent of melt' },
+              { value: 'perGram', label: 'Posted per gram' },
+            ]}
           />
+          <Text style={styles.hint}>
+            {mode === 'percent'
+              ? 'Floats with spot on its own — the offer moves as the market does.'
+              : 'A fixed board price per gram of the item as presented, not per gram of pure metal. Simpler to read out, but it goes stale as spot moves, so the calculator shows what percentage of melt it currently works out to.'}
+          </Text>
+
+          <View style={{ height: spacing.md }} />
+          {mode === 'percent' ? (
+            <Input
+              label="Percent of melt"
+              value={rateText}
+              onChangeText={setRateText}
+              keyboardType="number-pad"
+              suffix="%"
+            />
+          ) : (
+            <Input
+              label="Price per gram"
+              value={perGramText}
+              onChangeText={setPerGramText}
+              keyboardType="decimal-pad"
+              prefix="$"
+              placeholder="42.00"
+            />
+          )}
           {!!problem && <Text style={styles.problem}>{problem}</Text>}
 
           <Divider />
@@ -282,7 +331,9 @@ function RuleEditor({
             {METALS[rule.metal].name} ·{' '}
             {purityId === 'any' ? 'all purities' : (findPurity(purityId)?.label ?? '')} ·{' '}
             {maxGrams == null ? `${minGrams} g and up` : `${minGrams}–${maxGrams} g`} →{' '}
-            <Text style={styles.previewRate}>{percent(rate, 0)} of melt</Text>
+            <Text style={styles.previewRate}>
+              {mode === 'perGram' ? `${money(perGram)}/g` : `${percent(rate, 0)} of melt`}
+            </Text>
           </Text>
         </View>
       </ScrollView>
@@ -298,7 +349,9 @@ function RuleEditor({
               purityId: purityId === 'any' ? null : purityId,
               minGrams,
               maxGrams,
+              mode,
               rate,
+              perGram,
             })
           }
           style={{ flex: 2 }}
@@ -328,6 +381,7 @@ const styles = StyleSheet.create({
   ruleTitle: { ...type.body, color: colors.text, fontWeight: '600' },
   ruleBand: { ...type.caption, color: colors.textFaint },
   ruleRate: { ...type.mono, fontSize: 18, color: colors.gold },
+  ruleMode: { ...type.caption, fontSize: 10, color: colors.textFaint },
 
   emptyText: { ...type.body, color: colors.textMuted, lineHeight: 21 },
   hint: { ...type.caption, color: colors.textFaint, marginTop: spacing.sm, lineHeight: 16 },

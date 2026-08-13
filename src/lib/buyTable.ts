@@ -14,6 +14,16 @@ import { findPurity, toGrams, type MetalSymbol, type WeightUnit } from './metals
  * intake form resolve rates identically and it can be tested in plain node.
  */
 
+/**
+ * How a rule prices a piece.
+ *
+ * `percent` floats with spot automatically. `perGram` is a posted price — the
+ * board behind the counter says "14K: $42/g" — which is simpler for staff to
+ * read out but goes stale as spot moves, so the calculator always shows the
+ * percentage of melt a posted price currently works out to.
+ */
+export type RateMode = 'percent' | 'perGram';
+
 export interface BuyRule {
   id: string;
   metal: MetalSymbol;
@@ -23,9 +33,24 @@ export interface BuyRule {
   minGrams: number;
   /** Exclusive upper bound, or null for "and up". */
   maxGrams: number | null;
-  /** Fraction of melt paid out, 0–1. */
+  /**
+   * Pricing basis. Optional for rules written before per-gram pricing existed;
+   * absent means 'percent'.
+   */
+  mode?: RateMode;
+  /** Fraction of melt paid out, 0–1. Used when mode is 'percent'. */
   rate: number;
+  /**
+   * Currency per gram of the item *as presented* — per gram of 14K, not per
+   * gram of pure gold, because that is how a counter posts it. Used when mode
+   * is 'perGram'.
+   */
+  perGram?: number;
   label?: string;
+}
+
+export function ruleMode(rule: BuyRule): RateMode {
+  return rule.mode ?? 'percent';
 }
 
 export interface ResolvedRate {
@@ -107,6 +132,67 @@ export function resolveRate(
     rate: clamp01(winner.rate),
     rule: winner,
     reason: winner.label || `${purityLabel} · ${bandLabel(winner)}`,
+  };
+}
+
+export interface ResolvedOffer {
+  /** What to hand the customer. */
+  payout: number;
+  /** payout ÷ melt value — what a posted per-gram price is actually costing. */
+  impliedRate: number;
+  /** payout ÷ gross grams, the number read aloud at the counter. */
+  perGram: number;
+  mode: RateMode;
+  rule: BuyRule | null;
+  reason: string;
+  /**
+   * True when a posted per-gram price has drifted far enough from spot to be
+   * worth revisiting — either giving metal away or pricing nobody would accept.
+   */
+  stale: boolean;
+}
+
+/** A posted price this far from the table's own percent norms deserves a flag. */
+const STALE_LOW = 0.55;
+const STALE_HIGH = 0.98;
+
+/**
+ * Turns the matched rule into an actual offer.
+ *
+ * Both bases end up in the same three numbers — a total, a per-gram rate and a
+ * percentage of melt — so a buyer pricing off a posted board and a buyer
+ * pricing off spot can read the same panel.
+ */
+export function resolveOffer(
+  rules: BuyRule[],
+  query: RateQuery,
+  meltValue: number,
+  grossGrams: number,
+  fallbackRate: number,
+): ResolvedOffer {
+  const resolved = resolveRate(rules, query, fallbackRate);
+  const rule = resolved.rule;
+  const mode = rule ? ruleMode(rule) : 'percent';
+
+  const payout =
+    mode === 'perGram' && rule
+      ? Math.max(0, rule.perGram ?? 0) * Math.max(0, grossGrams)
+      : meltValue * resolved.rate;
+
+  const impliedRate = meltValue > 0 ? payout / meltValue : 0;
+
+  return {
+    payout,
+    impliedRate,
+    perGram: grossGrams > 0 ? payout / grossGrams : 0,
+    mode,
+    rule,
+    reason: resolved.reason,
+    // Only meaningful for posted prices; a percentage rule cannot drift.
+    stale:
+      mode === 'perGram' &&
+      meltValue > 0 &&
+      (impliedRate < STALE_LOW || impliedRate > STALE_HIGH),
   };
 }
 
