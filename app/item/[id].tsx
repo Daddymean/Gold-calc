@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { confirm, notify } from '@/lib/confirm';
+import { buildReceiptHtml } from '@/lib/receipt';
+import { printHtml, shareHtmlAsPdf } from '@/lib/print';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
@@ -29,6 +31,7 @@ export default function ItemDetailScreen() {
 
   const item = getItem(String(id));
   const [saleText, setSaleText] = useState('');
+  const [receiptBusy, setReceiptBusy] = useState(false);
 
   if (!item) {
     return (
@@ -95,6 +98,46 @@ export default function ItemDetailScreen() {
     }
 
     updateItem(item.id, { status, salePrice: undefined, soldAt: undefined });
+  };
+
+  // Built fresh each time rather than stored: the receipt is a view of the
+  // record, so a corrected weight or price is reflected on a reprint.
+  const receiptHtml = () =>
+    buildReceiptHtml(
+      {
+        ticket: item.ticket,
+        description: item.description,
+        metal: item.metal,
+        purityId: item.purityId,
+        weight: item.weight,
+        unit: item.unit,
+        quantity: item.quantity,
+        purchasePrice: item.purchasePrice,
+        currency: item.currency,
+        spotAtPurchase: item.spotAtPurchase,
+        meltAtPurchase: item.meltAtPurchase,
+        purchasedAt: item.purchasedAt,
+        transactionType: item.transactionType,
+      },
+      {
+        name: customer?.name ?? item.customerName,
+        phone: customer?.phone,
+        address: customer?.address,
+        idType: customer?.idType,
+        idNumber: customer?.idNumber,
+      },
+      { businessName: settings.businessName },
+    );
+
+  const withReceipt = async (action: (html: string) => Promise<void>) => {
+    setReceiptBusy(true);
+    try {
+      await action(receiptHtml());
+    } catch (err: any) {
+      notify('Could not produce the receipt', err?.message ?? 'Unknown error');
+    } finally {
+      setReceiptBusy(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -273,6 +316,29 @@ export default function ItemDetailScreen() {
       )}
 
       <View style={styles.section}>
+        <SectionLabel>Customer copy</SectionLabel>
+        <View style={styles.receiptRow}>
+          <Button
+            label="Print"
+            variant="secondary"
+            loading={receiptBusy}
+            onPress={() => withReceipt(printHtml)}
+            style={{ flex: 1 }}
+          />
+          <Button
+            label="Share PDF"
+            loading={receiptBusy}
+            onPress={() => withReceipt((html) => shareHtmlAsPdf(html, `${item.ticket}.pdf`))}
+            style={{ flex: 1 }}
+          />
+        </View>
+        <Text style={styles.receiptNote}>
+          Shows what you paid and how it was worked out, with only the last digits of the seller's
+          ID. Check the declaration wording against your local rules.
+        </Text>
+      </View>
+
+      <View style={styles.section}>
         <Button label="Delete record" variant="danger" onPress={confirmDelete} />
       </View>
     </ScrollView>
@@ -304,4 +370,7 @@ const styles = StyleSheet.create({
   customerLine: { ...type.caption, color: colors.textMuted, marginTop: 2 },
 
   notes: { ...type.body, color: colors.textMuted, lineHeight: 21 },
+
+  receiptRow: { flexDirection: 'row', gap: spacing.md },
+  receiptNote: { ...type.caption, color: colors.textFaint, lineHeight: 16, marginTop: spacing.sm },
 });
