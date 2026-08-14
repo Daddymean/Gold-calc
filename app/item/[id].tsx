@@ -100,8 +100,20 @@ export default function ItemDetailScreen() {
     updateItem(item.id, { status, salePrice: undefined, soldAt: undefined });
   };
 
-  // Built fresh each time rather than stored: the receipt is a view of the
-  // record, so a corrected weight or price is reflected on a reprint.
+  // Item details are read live, so correcting a mistyped weight fixes the
+  // reprint. Seller details are NOT: they are the audit fact of who was checked
+  // that day, and a renewed licence or a new address must not rewrite history.
+  // Records written before snapshots existed fall back to the live customer,
+  // and the receipt says which of the two it is printing.
+  const sellerAtSale = item.sellerAtSale;
+  const seller = sellerAtSale ?? {
+    name: customer?.name ?? item.customerName,
+    phone: customer?.phone,
+    address: customer?.address,
+    idType: customer?.idType,
+    idNumber: customer?.idNumber,
+  };
+
   const receiptHtml = () =>
     buildReceiptHtml(
       {
@@ -119,14 +131,8 @@ export default function ItemDetailScreen() {
         purchasedAt: item.purchasedAt,
         transactionType: item.transactionType,
       },
-      {
-        name: customer?.name ?? item.customerName,
-        phone: customer?.phone,
-        address: customer?.address,
-        idType: customer?.idType,
-        idNumber: customer?.idNumber,
-      },
-      { businessName: settings.businessName },
+      seller,
+      { businessName: settings.businessName, sellerAsRecorded: !!sellerAtSale },
     );
 
   const withReceipt = async (action: (html: string) => Promise<void>) => {

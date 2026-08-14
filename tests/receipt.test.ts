@@ -149,3 +149,22 @@ test('missing spot and melt figures are simply omitted', () => {
   assert.ok(!html.includes('Market price used'));
   assert.ok(html.includes('$619.83'), 'the amount paid is still there');
 });
+
+/* ------------------------------------------- seller details as recorded */
+
+test('the verification claim is only made for details recorded at the time of sale', () => {
+  // Printing today's customer record and claiming it was checked that day is a
+  // false statement on an audit document.
+  const asRecorded = buildReceiptHtml(item, seller, { sellerAsRecorded: true });
+  assert.ok(asRecorded.includes('verified at the time of sale'));
+
+  const live = buildReceiptHtml(item, seller, { sellerAsRecorded: false });
+  assert.ok(!live.includes('verified at the time of sale'));
+  assert.ok(live.includes('as currently on file'));
+});
+
+test('neither claim is made when there was no ID to verify', () => {
+  const html = buildReceiptHtml(item, { name: 'Walk-in' }, { sellerAsRecorded: true });
+  assert.ok(!html.includes('verified at the time of sale'));
+  assert.ok(!html.includes('as currently on file'));
+});

@@ -45,6 +45,12 @@ export interface ReceiptOptions {
   businessName?: string;
   /** Shown under the seller's signature line. Defaults to a neutral wording. */
   declaration?: string;
+  /**
+   * True when the seller details passed in are the ones recorded at the time of
+   * sale rather than the customer's current record. Only then may the document
+   * claim the identification was verified that day.
+   */
+  sellerAsRecorded?: boolean;
 }
 
 /** Enum values are for the database; a receipt gets readable English. */
@@ -209,7 +215,13 @@ export function buildReceiptHtml(
 
   <footer>
     Customer copy — please retain for your records.
-    ${seller.idNumber ? 'Identification was verified at the time of sale; only the last digits are shown here.' : ''}
+    ${
+      seller.idNumber
+        ? options.sellerAsRecorded
+          ? 'Identification was verified at the time of sale; only the last digits are shown here.'
+          : 'Seller details are shown as currently on file, not as recorded at the time of sale.'
+        : ''
+    }
   </footer>
 </body></html>`;
 }

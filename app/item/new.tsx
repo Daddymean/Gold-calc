@@ -153,6 +153,7 @@ export default function NewItemScreen() {
       // A name typed inline becomes a real customer record, so the next time
       // this person walks in their history is already there.
       let linkedId = customerId;
+      let linkedCustomer = customers.find((c) => c.id === customerId);
       if (!linkedId && customerName.trim()) {
         const created = await addCustomer({
           name: customerName.trim(),
@@ -160,6 +161,7 @@ export default function NewItemScreen() {
           idNumber: customerIdNumber.trim() || undefined,
         });
         linkedId = created.id;
+        linkedCustomer = created;
       }
 
       const now = new Date().toISOString();
@@ -178,6 +180,15 @@ export default function NewItemScreen() {
         status: 'in_stock',
         customerId: linkedId,
         customerName: customerName.trim() || undefined,
+        // Frozen now, for the same reason a lot freezes its cost basis: the
+        // receipt has to say who was checked on the day, not who they are now.
+        sellerAtSale: {
+          name: customerName.trim() || undefined,
+          phone: customerPhone.trim() || undefined,
+          address: linkedCustomer?.address,
+          idType: linkedCustomer?.idType,
+          idNumber: customerIdNumber.trim() || linkedCustomer?.idNumber,
+        },
         photoUris,
         tags: tagsText
           .split(',')
