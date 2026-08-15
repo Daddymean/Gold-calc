@@ -62,6 +62,21 @@ export interface InventoryItem {
   customerId?: string;
   /** Denormalised for fast list rendering and for records that outlive a customer. */
   customerName?: string;
+  /**
+   * The seller exactly as recorded when this transaction happened.
+   *
+   * The customer record is live — an ID gets renewed, someone moves house — but
+   * a receipt is an audit document, and reprinting one must show the details
+   * that were actually checked that day, not today's. Absent on records written
+   * before snapshots existed; those fall back to the live customer.
+   */
+  sellerAtSale?: {
+    name?: string;
+    phone?: string;
+    address?: string;
+    idType?: IdType;
+    idNumber?: string;
+  };
 
   photoUris: string[];
   tags: string[];
