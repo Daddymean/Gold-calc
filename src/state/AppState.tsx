@@ -12,7 +12,7 @@ import { getProvider, type ProviderId } from '@/lib/spot';
 import { METAL_ORDER } from '@/lib/metals';
 import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/storage';
 import { resolveOffer, type RateQuery, type ResolvedOffer } from '@/lib/buyTable';
-import { deletePhoto } from '@/lib/photos';
+import { deleteAllPhotos, deletePhoto } from '@/lib/photos';
 import { expiredIdPhotoOwners } from '@/lib/retention';
 import {
   activeLotItemIds,
@@ -384,9 +384,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [items, persistItems],
   );
 
+  // Deleting a record deletes its images too. This belongs here rather than in
+  // whichever screen happened to call it: a photo outliving the record it
+  // documents is a leak no second caller should be able to reintroduce.
   const deleteItem: AppStateValue['deleteItem'] = useCallback(
     async (id) => {
+      const doomed = items.find((it) => it.id === id);
       await persistItems(items.filter((it) => it.id !== id));
+      if (doomed) await Promise.all(doomed.photoUris.map(deletePhoto));
     },
     [items, persistItems],
   );
@@ -403,18 +408,33 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const updateCustomer: AppStateValue['updateCustomer'] = useCallback(
     async (id, patch) => {
+      const before = customers.find((c) => c.id === id);
       await persistCustomers(
         customers.map((c) =>
           c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c,
         ),
       );
+      // Swapping in a new ID photo must not strand the old one on disk.
+      if (
+        before?.idPhotoUri &&
+        'idPhotoUri' in patch &&
+        patch.idPhotoUri !== before.idPhotoUri
+      ) {
+        await deletePhoto(before.idPhotoUri);
+      }
     },
     [customers, persistCustomers],
   );
 
   const deleteCustomer: AppStateValue['deleteCustomer'] = useCallback(
     async (id) => {
+      const doomed = customers.find((c) => c.id === id);
       await persistCustomers(customers.filter((c) => c.id !== id));
+      // The ID photo is the most sensitive file the app writes. Retention only
+      // sweeps images that have aged out; deleting the person's record has to
+      // take theirs with it, or it stays in the sandbox with nothing in the UI
+      // that can reach it.
+      if (doomed?.idPhotoUri) await deletePhoto(doomed.idPhotoUri);
     },
     [customers, persistCustomers],
   );
@@ -562,6 +582,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   );
 
   const resetAll = useCallback(async () => {
+    // Photos first: they are plain files, so destroying the key in clearAll()
+    // does nothing to them. "Erase everything" has to mean it.
+    await deleteAllPhotos();
     await storage.clearAll();
     setVaultError(null);
     setBuyRules([]);

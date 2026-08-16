@@ -19,7 +19,10 @@ export default function PricesScreen() {
     useApp();
   const spot = useSpot();
 
-  const summary = useMemo(() => summarisePortfolio(items, spot), [items, spot]);
+  const summary = useMemo(
+    () => summarisePortfolio(items, spot, settings.currency),
+    [items, spot, settings.currency],
+  );
   const present = metalsPresent(summary);
 
   // Pull a short series per metal purely to draw the row sparklines.
@@ -111,19 +114,30 @@ export default function PricesScreen() {
               <Text style={styles.heroLabel}>Market value · {summary.heldCount} items held</Text>
               <Text style={styles.hero}>{money(summary.marketValue, settings.currency)}</Text>
 
-              <View style={styles.heroDelta}>
-                <Text
-                  style={[
-                    styles.heroDeltaText,
-                    { color: summary.unrealisedGain >= 0 ? colors.up : colors.down },
-                  ]}
-                >
-                  {summary.unrealisedGain >= 0 ? '▲' : '▼'}{' '}
-                  {money(Math.abs(summary.unrealisedGain), settings.currency)} (
-                  {signedPercent(summary.unrealisedPercent)})
-                </Text>
-                <Text style={styles.heroDeltaLabel}>unrealised vs cost</Text>
-              </View>
+              {/* A zero gain because nothing can be compared is not a flat
+                  book, and must not be drawn as one. */}
+              {summary.gainUnavailable ? (
+                <View style={styles.heroDelta}>
+                  <Text style={[styles.heroDeltaText, { color: colors.textMuted }]}>—</Text>
+                  <Text style={styles.heroDeltaLabel}>
+                    no cost recorded in {settings.currency}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.heroDelta}>
+                  <Text
+                    style={[
+                      styles.heroDeltaText,
+                      { color: summary.unrealisedGain >= 0 ? colors.up : colors.down },
+                    ]}
+                  >
+                    {summary.unrealisedGain >= 0 ? '▲' : '▼'}{' '}
+                    {money(Math.abs(summary.unrealisedGain), settings.currency)} (
+                    {signedPercent(summary.unrealisedPercent)})
+                  </Text>
+                  <Text style={styles.heroDeltaLabel}>unrealised vs cost</Text>
+                </View>
+              )}
 
               {present.length > 0 && (
                 <View style={styles.composition}>
@@ -149,11 +163,22 @@ export default function PricesScreen() {
 
               <Divider />
 
+              {/* Same rule as the hero: a total of zero because everything was
+                  excluded is not zero, and reads as a result if printed. */}
               <View style={styles.miniGrid}>
-                <Mini label="Cost basis" value={money(summary.costBasis, settings.currency, 0)} />
+                <Mini
+                  label="Cost basis"
+                  value={
+                    summary.gainUnavailable ? '—' : money(summary.costBasis, settings.currency, 0)
+                  }
+                />
                 <Mini
                   label="Realised P&L"
-                  value={money(summary.realisedGain, settings.currency, 0)}
+                  value={
+                    summary.realisedGain === 0 && summary.offCurrencySold > 0
+                      ? '—'
+                      : money(summary.realisedGain, settings.currency, 0)
+                  }
                   tone={summary.realisedGain >= 0 ? 'up' : 'down'}
                 />
               </View>
@@ -162,6 +187,23 @@ export default function PricesScreen() {
                 <Text style={styles.warnNote}>
                   {summary.unpricedCount} item{summary.unpricedCount === 1 ? '' : 's'} could not be
                   valued — no live price for that metal.
+                </Text>
+              )}
+
+              {summary.offCurrencyHeld > 0 && (
+                <Text style={styles.warnNote}>
+                  {summary.offCurrencyHeld} held item
+                  {summary.offCurrencyHeld === 1 ? ' was' : 's were'} bought in another currency.
+                  Their metal is counted in the market value above; what you paid is not, so cost
+                  basis and unrealised gain leave {summary.offCurrencyHeld === 1 ? 'it' : 'them'}{' '}
+                  out.
+                </Text>
+              )}
+
+              {summary.offCurrencySold > 0 && (
+                <Text style={styles.warnNote}>
+                  Realised P&L excludes {summary.offCurrencySold} sold item
+                  {summary.offCurrencySold === 1 ? '' : 's'} bought in another currency.
                 </Text>
               )}
             </>

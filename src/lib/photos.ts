@@ -30,5 +30,18 @@ export async function deletePhoto(uri: string): Promise<void> {
   await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
 }
 
+/**
+ * Removes every image this app has written.
+ *
+ * "Erase everything" clears the records and destroys the key, which leaves the
+ * encrypted book unreadable — but photographs are ordinary files, and deleting
+ * a key does nothing to them. Without this, a wipe would leave pictures of
+ * jewellery and of customers' identification sitting in the sandbox after the
+ * operator was told the device had been cleared.
+ */
+export async function deleteAllPhotos(): Promise<void> {
+  await FileSystem.deleteAsync(PHOTO_DIR, { idempotent: true }).catch(() => {});
+}
+
 // The retention *policy* lives in `retention.ts`, which imports nothing native
 // so it can be unit tested; this module only does the deleting.
