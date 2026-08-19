@@ -9,7 +9,8 @@ import { IS_DEMO } from '@/lib/demoMode';
 import { PROVIDERS, type ProviderId } from '@/lib/spot';
 import { CURRENCIES, parseNumber } from '@/lib/format';
 import { METALS, METAL_ORDER, WEIGHT_UNITS, WEIGHT_UNIT_ORDER } from '@/lib/metals';
-import { customersCsv, inventoryCsv, shareCsv } from '@/lib/export';
+import { customersCsv, inventoryCsv } from '@/lib/csv';
+import { shareCsv } from '@/lib/export';
 import { Button, Card, Divider, Input, SectionLabel, Segmented } from '@/components/ui';
 import { colors, spacing, type } from '@/theme';
 
@@ -50,9 +51,9 @@ export default function SettingsScreen() {
     try {
       const stamp = new Date().toISOString().slice(0, 10);
       if (which === 'inventory') {
-        await shareCsv(`inventory-${stamp}.csv`, inventoryCsv(items, spot));
+        await shareCsv(`inventory-${stamp}.csv`, inventoryCsv(items, spot, settings.currency));
       } else {
-        await shareCsv(`customers-${stamp}.csv`, customersCsv(customers, items));
+        await shareCsv(`customers-${stamp}.csv`, customersCsv(customers, items, settings.currency));
       }
     } catch (err: any) {
       notify('Export failed', err?.message ?? 'Unknown error');

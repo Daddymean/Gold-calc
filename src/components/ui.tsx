@@ -246,10 +246,19 @@ export function StatRow({
   label: string;
   value: string;
   emphasis?: boolean;
-  tone?: 'up' | 'down' | 'gold';
+  /** 'muted' is for a row that has no figure to give — say why, quietly. */
+  tone?: 'up' | 'down' | 'gold' | 'muted';
 }) {
   const valueColor =
-    tone === 'up' ? colors.up : tone === 'down' ? colors.down : tone === 'gold' ? colors.gold : colors.text;
+    tone === 'up'
+      ? colors.up
+      : tone === 'down'
+        ? colors.down
+        : tone === 'gold'
+          ? colors.gold
+          : tone === 'muted'
+            ? colors.textMuted
+            : colors.text;
   return (
     <View style={[s.statRow, emphasis && s.statRowEmphasis]}>
       <Text style={s.statLabel}>{label}</Text>

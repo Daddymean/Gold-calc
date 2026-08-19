@@ -10,7 +10,6 @@ import { METALS, findPurity, toGrams } from '@/lib/metals';
 import { money, parseNumber, percent, shortDate, signedPercent, weight as fmtWeight } from '@/lib/format';
 import { valueItem } from '@/lib/portfolio';
 import { PhotoPicker } from '@/components/PhotoPicker';
-import { deletePhoto } from '@/lib/photos';
 import { Badge, Button, Card, Divider, Input, SectionLabel, Segmented, StatRow } from '@/components/ui';
 import { colors, radius, spacing, type } from '@/theme';
 import type { ItemStatus } from '@/types';
@@ -44,7 +43,7 @@ export default function ItemDetailScreen() {
 
   const meta = METALS[item.metal];
   const purity = findPurity(item.purityId);
-  const valuation = valueItem(item, spot);
+  const valuation = valueItem(item, spot, settings.currency);
   const customer = item.customerId ? getCustomer(item.customerId) : undefined;
 
   // Margin is measured against what the piece is worth now, or against the
@@ -154,7 +153,7 @@ export default function ItemDetailScreen() {
       destructive: true,
     });
     if (!ok) return;
-    await Promise.all(item.photoUris.map(deletePhoto));
+    // deleteItem removes the photo files too — see AppState.
     await deleteItem(item.id);
     router.back();
   };
@@ -202,15 +201,29 @@ export default function ItemDetailScreen() {
           <StatRow label="You paid" value={money(item.purchasePrice, item.currency)} />
           <StatRow
             label={item.status === 'sold' ? 'Sold for' : 'Worth now'}
-            value={money(exitValue, settings.currency)}
+            // A sale price is money that was recorded, in the item's currency;
+            // "worth now" comes from today's feed, in the display currency.
+            value={
+              item.status === 'sold' && item.salePrice != null
+                ? money(item.salePrice, item.currency)
+                : money(valuation.meltNow, settings.currency)
+            }
             tone="gold"
           />
-          <StatRow
-            label={item.status === 'sold' ? 'Realised P&L' : 'Unrealised P&L'}
-            value={`${money(valuation.gain, settings.currency)} (${signedPercent(valuation.gainPercent, 1)})`}
-            emphasis
-            tone={gainTone}
-          />
+          {valuation.comparable ? (
+            <StatRow
+              label={item.status === 'sold' ? 'Realised P&L' : 'Unrealised P&L'}
+              value={`${money(valuation.gain, settings.currency)} (${signedPercent(valuation.gainPercent, 1)})`}
+              emphasis
+              tone={gainTone}
+            />
+          ) : (
+            <StatRow
+              label="P&L"
+              value={`not shown — bought in ${item.currency}`}
+              tone="muted"
+            />
+          )}
 
           <Divider />
 

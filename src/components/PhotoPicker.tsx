@@ -59,7 +59,12 @@ export function PhotoPicker({
       if (result.canceled) return;
 
       const saved = await Promise.all(result.assets.map((asset) => persistPhoto(asset.uri)));
-      onChange([...photos, ...saved].slice(0, max));
+      const next = [...photos, ...saved].slice(0, max);
+      onChange(next);
+      // Anything over the limit was already copied into the app's directory.
+      // Dropping it from the record without deleting the file would leave an
+      // image on disk that nothing in the app can ever show or remove.
+      await Promise.all(saved.filter((uri) => !next.includes(uri)).map(deletePhoto));
     } catch (err: any) {
       notify('Could not add photo', err?.message ?? 'Unknown error');
     } finally {

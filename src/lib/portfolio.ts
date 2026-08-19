@@ -1,20 +1,52 @@
-import { calculateMelt, findPurity, METAL_ORDER, type MetalSymbol } from '@/lib/metals';
+// Relative with an explicit extension: this module is exercised by the node
+// test runner, which does not resolve the bundler's '@/' alias. Type-only
+// imports are erased before Node sees them, so those may keep the alias.
+import { calculateMelt, findPurity, METAL_ORDER, type MetalSymbol } from './metals.ts';
+import type { CurrencyCode } from '@/lib/format';
 import type { InventoryItem } from '@/types';
 
+/**
+ * Valuation, and the one rule that governs it.
+ *
+ * Two kinds of number live on an item and they do not mix:
+ *
+ *   - **Recorded money** — purchase price, sale price — is in `item.currency`,
+ *     stamped when the record was written and never restated.
+ *   - **Derived value** — melt at today's spot — is in whatever currency the
+ *     price feed is currently quoting, i.e. the display currency.
+ *
+ * They are the same unit only while the shop's currency has not changed. A book
+ * that took a deal in EUR and now displays USD holds costs in one unit and
+ * market values in another, and subtracting them produces a confident, wrong
+ * answer. So cost and gain are aggregated over matching-currency items only,
+ * and the count of the rest is reported rather than buried. Physical quantities
+ * — grams — and spot-derived market values are always valid, because neither
+ * depends on what the item cost.
+ *
+ * Converting instead would need an FX rate for the date of each purchase, which
+ * the app does not have. Declining to add the numbers is the honest option.
+ */
+
 export interface ItemValuation {
-  /** Melt value of the item at the current spot price. */
+  /** Melt value at the current spot price, in the display currency. */
   meltNow: number;
-  /** meltNow − purchasePrice, or salePrice − purchasePrice once sold. */
+  /** meltNow − purchasePrice, or salePrice − purchasePrice once sold. Zero when not comparable. */
   gain: number;
   gainPercent: number;
   pureGrams: number;
   /** False when we have no spot price for this item's metal. */
   priced: boolean;
+  /**
+   * False when the item was recorded in a different currency from the one on
+   * screen. `meltNow` is still right; `gain` is not, and is zeroed.
+   */
+  comparable: boolean;
 }
 
 export function valueItem(
   item: InventoryItem,
   spot: Partial<Record<MetalSymbol, number>>,
+  displayCurrency: CurrencyCode,
 ): ItemValuation {
   const purity = findPurity(item.purityId);
   const spotPrice = spot[item.metal];
@@ -30,43 +62,66 @@ export function valueItem(
 
   // A graded coin is worth its numismatic price, not its melt. Valuing it at
   // melt would understate the book, so the collector value wins when set.
+  //
+  // Unlike melt, a numismatic value is money the operator typed, so it is in
+  // the item's own currency — only usable here when that matches the display.
+  const comparable = item.currency === displayCurrency;
   const marketValue =
-    item.isNumismatic && item.numismaticValue ? item.numismaticValue : result.meltValue;
+    item.isNumismatic && item.numismaticValue && comparable
+      ? item.numismaticValue
+      : result.meltValue;
 
   // Once sold, the gain is realised and fixed — current spot no longer moves it.
   const exitValue = item.status === 'sold' && item.salePrice != null ? item.salePrice : marketValue;
-  const gain = exitValue - item.purchasePrice;
+  const gain = comparable ? exitValue - item.purchasePrice : 0;
 
   return {
     meltNow: marketValue,
     gain,
-    gainPercent: item.purchasePrice > 0 ? gain / item.purchasePrice : 0,
+    gainPercent: comparable && item.purchasePrice > 0 ? gain / item.purchasePrice : 0,
     pureGrams: result.pureGrams,
     priced: spotPrice != null,
+    comparable,
   };
 }
 
 export interface PortfolioSummary {
-  /** Items still on the shelf. */
+  /** Items still on the shelf, whatever currency they were bought in. */
   heldCount: number;
-  /** What was paid for everything still held. */
+  /** What was paid for held items recorded in the display currency. */
   costBasis: number;
-  /** What everything still held is worth right now. */
+  /** What everything still held is worth right now — spot-derived, so complete. */
   marketValue: number;
   unrealisedGain: number;
   unrealisedPercent: number;
-  /** Profit already banked on sold items. */
+  /** Profit already banked on sold items, in the display currency. */
   realisedGain: number;
   pureGramsByMetal: Record<MetalSymbol, number>;
   /** Market value split by metal, for the composition bar. */
   valueByMetal: Record<MetalSymbol, number>;
   /** Any item whose metal has no current quote — the totals are incomplete. */
   unpricedCount: number;
+  /**
+   * Held items recorded in another currency. Their metal is counted in the
+   * weights and the market value; their cost is not, so `costBasis` and
+   * `unrealisedGain` exclude them.
+   */
+  offCurrencyHeld: number;
+  /** Sold items recorded in another currency, excluded from `realisedGain`. */
+  offCurrencySold: number;
+  /**
+   * True when there is no cost to compare against — either the book is empty
+   * or everything in it was bought in a different currency. The gain figures
+   * are zero because they are unknown, not because the book is flat, and the
+   * caller must not present them as a result.
+   */
+  gainUnavailable: boolean;
 }
 
 export function summarisePortfolio(
   items: InventoryItem[],
   spot: Partial<Record<MetalSymbol, number>>,
+  displayCurrency: CurrencyCode,
 ): PortfolioSummary {
   const summary: PortfolioSummary = {
     heldCount: 0,
@@ -78,12 +133,21 @@ export function summarisePortfolio(
     pureGramsByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
     valueByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
     unpricedCount: 0,
+    offCurrencyHeld: 0,
+    offCurrencySold: 0,
+    gainUnavailable: false,
   };
 
+  // Market value of the held items whose cost is also counted. The unrealised
+  // gain is the difference between these two, never against the full market
+  // value — that would credit off-currency stock with a gain from no cost.
+  let comparableMarketValue = 0;
+
   for (const item of items) {
-    const valuation = valueItem(item, spot);
+    const valuation = valueItem(item, spot, displayCurrency);
 
     if (item.status === 'sold') {
+      if (!valuation.comparable) summary.offCurrencySold += 1;
       summary.realisedGain += valuation.gain;
       continue;
     }
@@ -91,16 +155,25 @@ export function summarisePortfolio(
     if (item.status === 'melted') continue;
 
     summary.heldCount += 1;
-    summary.costBasis += item.purchasePrice;
     summary.marketValue += valuation.meltNow;
     summary.pureGramsByMetal[item.metal] += valuation.pureGrams;
     summary.valueByMetal[item.metal] += valuation.meltNow;
     if (!valuation.priced) summary.unpricedCount += 1;
+
+    if (valuation.comparable) {
+      summary.costBasis += item.purchasePrice;
+      comparableMarketValue += valuation.meltNow;
+    } else {
+      summary.offCurrencyHeld += 1;
+    }
   }
 
-  summary.unrealisedGain = summary.marketValue - summary.costBasis;
+  summary.unrealisedGain = comparableMarketValue - summary.costBasis;
   summary.unrealisedPercent =
     summary.costBasis > 0 ? summary.unrealisedGain / summary.costBasis : 0;
+  // Nothing to measure against. Zero here means "unknown", and a screen that
+  // draws it as a flat green delta would be making a claim about the book.
+  summary.gainUnavailable = summary.costBasis === 0 && summary.heldCount > 0;
 
   return summary;
 }

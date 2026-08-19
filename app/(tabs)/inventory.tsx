@@ -59,12 +59,16 @@ export default function InventoryScreen() {
   const totals = useMemo(() => {
     let cost = 0;
     let value = 0;
+    let offCurrency = 0;
     for (const item of visible) {
-      cost += item.purchasePrice;
-      value += valueItem(item, spot).meltNow;
+      // Market value is spot-derived and always in the display currency; what
+      // was paid is in the item's own. Only the matching ones can be totalled.
+      value += valueItem(item, spot, settings.currency).meltNow;
+      if (item.currency === settings.currency) cost += item.purchasePrice;
+      else offCurrency += 1;
     }
-    return { cost, value };
-  }, [visible, spot]);
+    return { cost, value, offCurrency };
+  }, [visible, spot, settings.currency]);
 
   return (
     <View style={styles.screen}>
@@ -84,6 +88,7 @@ export default function InventoryScreen() {
           <Text style={styles.summaryText}>
             {visible.length} item{visible.length === 1 ? '' : 's'} · cost{' '}
             {money(totals.cost, settings.currency, 0)}
+            {totals.offCurrency > 0 ? ` (excl. ${totals.offCurrency} in other currencies)` : ''}
           </Text>
           <Text style={styles.summaryValue}>{money(totals.value, settings.currency, 0)}</Text>
         </View>
@@ -137,7 +142,7 @@ export default function InventoryScreen() {
 function ItemRow({ item, onPress }: { item: InventoryItem; onPress: () => void }) {
   const { settings } = useApp();
   const spot = useSpot();
-  const valuation = valueItem(item, spot);
+  const valuation = valueItem(item, spot, settings.currency);
   const meta = METALS[item.metal];
   const purity = findPurity(item.purityId);
   const up = valuation.gain >= 0;
@@ -179,11 +184,19 @@ function ItemRow({ item, onPress }: { item: InventoryItem; onPress: () => void }
       </View>
 
       <View style={styles.cardRight}>
-        <Text style={styles.paid}>{money(item.purchasePrice, settings.currency, 0)}</Text>
-        <Text style={styles.paidLabel}>paid</Text>
-        <Text style={[styles.gain, { color: up ? colors.up : colors.down }]}>
-          {signedPercent(valuation.gainPercent, 0)}
+        {/* The item's own currency, not the shop's: a €500 piece must never
+            read as $500 because the display currency changed since. */}
+        <Text style={styles.paid}>{money(item.purchasePrice, item.currency, 0)}</Text>
+        <Text style={styles.paidLabel}>
+          paid{item.currency === settings.currency ? '' : ` ${item.currency}`}
         </Text>
+        {valuation.comparable ? (
+          <Text style={[styles.gain, { color: up ? colors.up : colors.down }]}>
+            {signedPercent(valuation.gainPercent, 0)}
+          </Text>
+        ) : (
+          <Text style={[styles.gain, { color: colors.textFaint }]}>—</Text>
+        )}
       </View>
     </Pressable>
   );
