@@ -41,11 +41,34 @@ export interface RealisedEvent {
   currency: CurrencyCode;
 }
 
-/** Calendar year of an ISO date, or null if it cannot be read. */
+/**
+ * Calendar year of an ISO date **in the device's own timezone**, or null if it
+ * cannot be read.
+ *
+ * Local, not UTC, because the year has to agree with the date the operator sees
+ * and with the day the transaction happened in their shop. A sale rung up at
+ * 8pm on 31 December in New York is stored as 01 January UTC; reporting it in
+ * the following year would move income across a tax boundary for no reason the
+ * dealer could ever see on screen.
+ */
 export function yearOf(iso: string | undefined): number | null {
   if (!iso) return null;
-  const year = new Date(iso).getUTCFullYear();
+  const year = new Date(iso).getFullYear();
   return Number.isFinite(year) ? year : null;
+}
+
+/**
+ * The transaction's date as YYYY-MM-DD in the device's timezone.
+ *
+ * Slicing the ISO string would give the UTC day, which can differ by one from
+ * the date shown on screen — an export whose dates disagree with the app is
+ * worse than no export.
+ */
+export function localDateKey(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /**

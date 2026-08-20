@@ -2,7 +2,7 @@
 // does not resolve the bundler's '@/' alias. Type-only imports are erased.
 import { METALS, findPurity, toGrams } from './metals.ts';
 import { valueItem } from './portfolio.ts';
-import type { YearSummary } from './taxYear.ts';
+import { localDateKey, type YearSummary } from './taxYear.ts';
 import type { CurrencyCode } from '@/lib/format';
 import type { Customer, InventoryItem, MetalSymbol } from '@/types';
 
@@ -19,13 +19,25 @@ import type { Customer, InventoryItem, MetalSymbol } from '@/types';
  * EUR purchase to a USD one is a wrong answer nobody would catch by eye.
  */
 
+/** A plain decimal number, positive or negative. Never a formula. */
+const NUMERIC = /^-?\d+(\.\d+)?$/;
+
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   const text = String(value);
+
   // Escape by RFC 4180: wrap in quotes and double any internal quote. Also
-  // neutralise leading =/+/-/@ so a description can't execute in a spreadsheet.
+  // neutralise a leading =/+/-/@ so a description can't execute in a
+  // spreadsheet.
+  //
+  // Except when the value is simply a negative number. Quoting "-900.00"
+  // imports it as text, and a Profit column where every loss is text sums to
+  // more than the year made — the totals row would disagree with the column
+  // above it, and the losses this report exists to show would be the ones
+  // silently dropped. A formula attack needs an operator or a reference after
+  // the sign; "-900.00" has neither.
   const needsQuotes = /[",\n\r]/.test(text);
-  const guarded = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  const guarded = /^[=+\-@]/.test(text) && !NUMERIC.test(text) ? `'${text}` : text;
   return needsQuotes ? `"${guarded.replace(/"/g, '""')}"` : guarded;
 }
 
@@ -193,7 +205,7 @@ export function taxYearCsv(summary: YearSummary): string {
     .slice()
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     .map((event) => [
-      event.date.slice(0, 10),
+      localDateKey(event.date),
       event.kind === 'sale' ? 'Sale' : 'Refining',
       event.reference,
       event.description,
@@ -222,7 +234,7 @@ export function taxYearCsv(summary: YearSummary): string {
     rows.push(['Not included — recorded in another currency']);
     for (const event of summary.excluded) {
       rows.push([
-        event.date.slice(0, 10),
+        localDateKey(event.date),
         event.kind === 'sale' ? 'Sale' : 'Refining',
         event.reference,
         event.description,

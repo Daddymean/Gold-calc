@@ -28,7 +28,8 @@ export default function ReportsScreen() {
   const events = useMemo(() => realisedEvents(items, lots), [items, lots]);
   const years = useMemo(() => availableYears(events), [events]);
   const [year, setYear] = useState<number | null>(null);
-  const active = year ?? years[0] ?? new Date().getUTCFullYear();
+  // Local, matching yearOf — the year on screen must be the dealer's year.
+  const active = year ?? years[0] ?? new Date().getFullYear();
 
   const summary = useMemo(
     () => summariseYear(events, active, settings.currency),
@@ -190,7 +191,10 @@ export default function ReportsScreen() {
           label={`Export ${active} as CSV`}
           onPress={doExport}
           loading={exporting}
-          disabled={!summary.events.length}
+          // Enabled when there is anything to write, included or not. A year
+          // holding only foreign-currency entries still has a file worth
+          // having — the screen has just promised they are listed in it.
+          disabled={!summary.events.length && !summary.excluded.length}
         />
         <Text style={styles.disclaimer}>
           This is what your book says, arranged so an accountant can read it. It is not tax advice,

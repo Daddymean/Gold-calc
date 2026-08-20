@@ -51,7 +51,10 @@ test('a value containing a comma or quote cannot break the row', () => {
 test('a cell that would execute as a spreadsheet formula is neutralised', () => {
   // Without this a description field is a way to run code on the accountant's
   // machine when they open the export.
-  for (const attack of ['=1+1', '+1', '-1', '@SUM(A1)']) {
+  //
+  // A bare "-1" is deliberately absent: it is a number, and quoting it broke
+  // every loss in the profit-and-loss export. See the ledger tests below.
+  for (const attack of ['=1+1', '+1', '-1+1', '@SUM(A1)']) {
     assert.ok(csvCell(attack).startsWith("'"), `${attack} must not stay live`);
   }
   assert.equal(csvCell('=HYPERLINK("http://x")'), `"'=HYPERLINK(""http://x"")"`);
@@ -119,4 +122,24 @@ test('a customer with nothing on the book exports zero, not a blank', () => {
   assert.equal(column(csv, 'Transactions'), '0');
   assert.equal(column(csv, 'Total paid'), '0.00');
   assert.equal(column(csv, 'Also paid'), '');
+});
+
+/* ------------------------------------------------- profit and loss ledger */
+
+test('a loss exports as a number a spreadsheet will add up', () => {
+  // The formula guard used to quote anything starting with "-", so every loss
+  // imported as text. A Profit column that skips its losses sums to more than
+  // the year made, and disagrees with the totals row directly beneath it.
+  assert.equal(csvCell('-900.00'), '-900.00');
+  assert.equal(csvCell('-1234.56'), '-1234.56');
+  assert.equal(csvCell('598.64'), '598.64');
+});
+
+test('a formula that merely starts with a minus sign is still neutralised', () => {
+  // The attack needs an operator or a reference after the sign; a plain
+  // negative number has neither, which is what makes the exemption safe.
+  assert.ok(csvCell("-2+3+cmd|' /C calc'!A0").startsWith("'"));
+  assert.ok(csvCell('-1e5').startsWith("'"), 'exponent notation is not a plain decimal');
+  assert.ok(csvCell('--900').startsWith("'"));
+  assert.ok(csvCell('=1+1').startsWith("'"));
 });

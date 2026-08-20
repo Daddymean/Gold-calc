@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   availableYears,
+  localDateKey,
   realisedEvents,
   summariseYear,
   yearOf,
@@ -36,6 +37,15 @@ const item = (patch: Partial<Item> = {}): Item =>
 
 const sold = (patch: Partial<Item> = {}): Item =>
   item({ status: 'sold', salePrice: 600, soldAt: '2026-03-10T00:00:00.000Z', ...patch } as Partial<Item>);
+
+/**
+ * An ISO instant for a given wall-clock moment in whatever timezone the test is
+ * running in. Written this way so the year-boundary tests below assert on the
+ * dealer's local day rather than passing only where the runner happens to be
+ * UTC.
+ */
+const localIso = (y: number, m: number, d: number, h = 12) =>
+  new Date(y, m - 1, d, h).toISOString();
 
 const lot = (patch: Partial<Lot> = {}): Lot =>
   ({
@@ -140,7 +150,7 @@ test('sales and refining are reported separately as well as together', () => {
 });
 
 test('another year is not in this year', () => {
-  const events = realisedEvents([sold({ soldAt: '2025-12-31T23:00:00.000Z' } as Partial<Item>)], []);
+  const events = realisedEvents([sold({ soldAt: localIso(2025, 12, 31, 12) } as Partial<Item>)], []);
   assert.equal(summariseYear(events, 2026, 'USD').events.length, 0);
   assert.equal(summariseYear(events, 2025, 'USD').events.length, 1);
 });
@@ -191,4 +201,31 @@ test('a report run in the other currency picks up the other half', () => {
   const year = summariseYear(events, 2026, 'EUR');
   assert.equal(year.profit, 200);
   assert.equal(year.excluded.length, 1);
+});
+
+/* ------------------------------------------------- the dealer\'s own year */
+
+test("a late sale on New Year's Eve stays in the year it was rung up", () => {
+  // Stored in UTC, an 8pm sale on 31 December in New York is 1 January. The
+  // screen shows 31 December, and the report has to agree — otherwise income
+  // moves across a tax boundary for a reason nobody in the shop can see.
+  const iso = localIso(2026, 12, 31, 20);
+  assert.equal(yearOf(iso), 2026);
+
+  const events = realisedEvents([sold({ soldAt: iso } as Partial<Item>)], []);
+  assert.equal(summariseYear(events, 2026, 'USD').events.length, 1);
+  assert.equal(summariseYear(events, 2027, 'USD').events.length, 0);
+});
+
+test("an early sale on New Year's Day stays in the new year", () => {
+  const iso = localIso(2027, 1, 1, 1);
+  assert.equal(yearOf(iso), 2027);
+  const events = realisedEvents([sold({ soldAt: iso } as Partial<Item>)], []);
+  assert.equal(summariseYear(events, 2027, 'USD').events.length, 1);
+});
+
+test('the exported date is the day the operator saw, not the UTC day', () => {
+  const iso = localIso(2026, 12, 31, 20);
+  assert.equal(localDateKey(iso), '2026-12-31');
+  assert.equal(localDateKey('not a date'), '');
 });
