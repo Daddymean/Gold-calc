@@ -109,7 +109,7 @@ export default function LotsScreen() {
 function LotRow({ lot, onPress }: { lot: MeltLot; onPress: () => void }) {
   const { settings } = useApp();
   const settled = lot.status === 'settled';
-  const result = settled ? calculateSettlement(lot.assayLines, lot.fees, lot.costBasis) : null;
+  const result = settled ? calculateSettlement(lot) : null;
 
   return (
     <Pressable

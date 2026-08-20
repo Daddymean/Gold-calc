@@ -2,6 +2,7 @@
 // test runner, which does not resolve the bundler's '@/' alias. Type-only
 // imports are erased before Node sees them, so those may keep the alias.
 import { calculateMelt, findPurity, METAL_ORDER, type MetalSymbol } from './metals.ts';
+import { calculateSettlement, type LotFees, type AssayLine, type LotStatus } from './refining.ts';
 import type { CurrencyCode } from '@/lib/format';
 import type { InventoryItem } from '@/types';
 
@@ -94,8 +95,21 @@ export interface PortfolioSummary {
   marketValue: number;
   unrealisedGain: number;
   unrealisedPercent: number;
-  /** Profit already banked on sold items, in the display currency. */
+  /**
+   * Profit already banked, in the display currency: sales plus settled refining
+   * lots. Scrap is the larger half of most dealers' realised profit, and a
+   * figure that counted only shop sales would understate the year.
+   */
   realisedGain: number;
+  /** The sales half of `realisedGain`. */
+  realisedFromSales: number;
+  /**
+   * The refining half. Only settled lots count — until the refiner reports
+   * there is no number, and guessing one would flatter the book.
+   */
+  realisedFromRefining: number;
+  /** Settled lots left out of the total because they were priced in another currency. */
+  offCurrencyLots: number;
   pureGramsByMetal: Record<MetalSymbol, number>;
   /** Market value split by metal, for the composition bar. */
   valueByMetal: Record<MetalSymbol, number>;
@@ -118,10 +132,21 @@ export interface PortfolioSummary {
   gainUnavailable: boolean;
 }
 
+/** The part of a melt lot this roll-up needs. */
+export interface SummaryLot {
+  status: LotStatus;
+  assayLines: AssayLine[];
+  fees: LotFees;
+  costBasis: number;
+  actualPayout?: number;
+  currency: CurrencyCode;
+}
+
 export function summarisePortfolio(
   items: InventoryItem[],
   spot: Partial<Record<MetalSymbol, number>>,
   displayCurrency: CurrencyCode,
+  lots: SummaryLot[],
 ): PortfolioSummary {
   const summary: PortfolioSummary = {
     heldCount: 0,
@@ -130,6 +155,9 @@ export function summarisePortfolio(
     unrealisedGain: 0,
     unrealisedPercent: 0,
     realisedGain: 0,
+    realisedFromSales: 0,
+    realisedFromRefining: 0,
+    offCurrencyLots: 0,
     pureGramsByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
     valueByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
     unpricedCount: 0,
@@ -148,7 +176,7 @@ export function summarisePortfolio(
 
     if (item.status === 'sold') {
       if (!valuation.comparable) summary.offCurrencySold += 1;
-      summary.realisedGain += valuation.gain;
+      summary.realisedFromSales += valuation.gain;
       continue;
     }
     // Melted stock has left the book as an item; its value moved to refining.
@@ -167,6 +195,19 @@ export function summarisePortfolio(
       summary.offCurrencyHeld += 1;
     }
   }
+
+  // Scrap that has been sent, assayed and paid for is realised profit as surely
+  // as a sale over the counter. Melted items were skipped above precisely
+  // because their outcome lives here instead.
+  for (const lot of lots) {
+    if (lot.status !== 'settled') continue;
+    if (lot.currency !== displayCurrency) {
+      summary.offCurrencyLots += 1;
+      continue;
+    }
+    summary.realisedFromRefining += calculateSettlement(lot).profit;
+  }
+  summary.realisedGain = summary.realisedFromSales + summary.realisedFromRefining;
 
   summary.unrealisedGain = comparableMarketValue - summary.costBasis;
   summary.unrealisedPercent =

@@ -71,6 +71,13 @@ export default function LotDetailScreen() {
   const [fees, setFees] = useState({ refining: '', assay: '', shipping: '', other: '' });
   const [saving, setSaving] = useState(false);
 
+  // Two ways to close a lot. Most statements arrive as a full assay, but plenty
+  // of refiners just send a figure — and a dealer holding the cheque should be
+  // able to record the truth without reverse-engineering a payable rate to
+  // reach it. 'none' is the state before either path is chosen.
+  const [mode, setMode] = useState<'none' | 'assay' | 'actual'>('none');
+  const [payoutText, setPayoutText] = useState('');
+
   if (!lot) {
     return (
       <View style={styles.missing}>
@@ -91,15 +98,29 @@ export default function LotDetailScreen() {
   };
 
   const settled = lot.status === 'settled';
+  const draftPayout = mode === 'actual' && payoutText.trim() ? parseNumber(payoutText) : undefined;
   const result = calculateSettlement(
-    settled ? lot.assayLines : editableLines,
-    settled ? lot.fees : feeValues,
-    lot.costBasis,
+    settled
+      ? { assayLines: lot.assayLines, fees: lot.fees, costBasis: lot.costBasis, actualPayout: lot.actualPayout }
+      : { assayLines: editableLines, fees: feeValues, costBasis: lot.costBasis, actualPayout: draftPayout },
   );
   const variance = calculateVariance(expected, result);
 
-  const startSettlement = () =>
+  const startAssay = () => {
+    setMode('assay');
     setLines(suggestAssayLines(expected, spot, uid).map(toDraft));
+  };
+
+  const startActual = () => {
+    setMode('actual');
+    setPayoutText('');
+  };
+
+  const cancelSettlement = () => {
+    setMode('none');
+    setLines(null);
+    setPayoutText('');
+  };
 
   const patchLine = (lineId: string, patch: Partial<LineDraft>) =>
     setLines((prev) =>
@@ -133,8 +154,14 @@ export default function LotDetailScreen() {
   const doSettle = async () => {
     setSaving(true);
     try {
-      await settleLot(lot.id, editableLines, feeValues);
-      setLines(null);
+      if (mode === 'actual') {
+        // No assay lines: nothing was reported line by line, and inventing
+        // some to justify the total would fabricate a variance report.
+        await settleLot(lot.id, [], feeValues, parseNumber(payoutText));
+      } else {
+        await settleLot(lot.id, editableLines, feeValues);
+      }
+      cancelSettlement();
     } finally {
       setSaving(false);
     }
@@ -183,15 +210,36 @@ export default function LotDetailScreen() {
             <StatRow label="Cost basis" value={money(lot.costBasis, lot.currency)} />
             {settled || editableLines.length > 0 ? (
               <>
-                <StatRow label="Payable value" value={money(result.grossValue, lot.currency)} tone="gold" />
-                <StatRow label="Fees" value={`− ${money(result.feesTotal, lot.currency)}`} />
-                <StatRow label="Refiner pays" value={money(result.netSettlement, lot.currency)} />
+                {/* A lot settled on a reported figure has no payable value and
+                    no fee deduction — printing "$0.00" for either would state
+                    that the refiner found nothing and charged nothing. */}
+                {result.feesDeducted && (
+                  <>
+                    <StatRow
+                      label="Payable value"
+                      value={money(result.grossValue, lot.currency)}
+                      tone="gold"
+                    />
+                    <StatRow label="Fees" value={`− ${money(result.feesTotal, lot.currency)}`} />
+                  </>
+                )}
+                <StatRow
+                  label={result.source === 'actual' ? 'Refiner paid' : 'Refiner pays'}
+                  value={money(result.netSettlement, lot.currency)}
+                  tone={result.source === 'actual' ? 'gold' : undefined}
+                />
                 <StatRow
                   label="Profit on the lot"
                   value={`${money(result.profit, lot.currency)} (${signedPercent(result.profitPercent, 1)})`}
                   emphasis
                   tone={result.profit >= 0 ? 'up' : 'down'}
                 />
+                {result.source === 'actual' && (
+                  <Text style={styles.note}>
+                    Settled on the amount the refiner reported paying. No assay was recorded, so
+                    there is nothing to compare against the book.
+                  </Text>
+                )}
               </>
             ) : (
               <Text style={styles.note}>
@@ -203,7 +251,12 @@ export default function LotDetailScreen() {
         </View>
 
         {/* -------------------------------------------------------- variance */}
-        {(settled || editableLines.length > 0) && variance.length > 0 && (
+        {/* Variance compares the book against the assay. With no assay there is
+            nothing to compare, and rendering it anyway reported a 100% shortfall
+            against a refiner who had simply not itemised their statement. */}
+        {result.source === 'assay' &&
+          (settled || editableLines.length > 0) &&
+          variance.length > 0 && (
           <View style={styles.section}>
             <SectionLabel>Book versus assay</SectionLabel>
             <Card padded={false}>
@@ -239,21 +292,72 @@ export default function LotDetailScreen() {
         {lot.status === 'sent' && (
           <View style={styles.section}>
             <SectionLabel>Settlement</SectionLabel>
-            {!lines ? (
+            {mode === 'none' ? (
               <Card>
                 <Text style={styles.note}>
-                  When the refiner's statement arrives, enter what they actually weighed, assayed
-                  and paid for.
+                  When the refiner's statement arrives, record what came back. If you only have the
+                  amount they paid, that is enough — it is the number that decides whether this lot
+                  made money.
                 </Text>
                 <Button
-                  label="Enter settlement"
-                  onPress={startSettlement}
+                  label="Enter the amount paid"
+                  onPress={startActual}
                   style={{ marginTop: spacing.md }}
                 />
+                <Button
+                  label="Enter the full assay"
+                  variant="secondary"
+                  onPress={startAssay}
+                  style={{ marginTop: spacing.sm }}
+                />
+                <Text style={styles.subNote}>
+                  The full assay takes longer but shows the variance — whether the lot assayed to
+                  what your book expected, and whether this refiner paid what they quoted.
+                </Text>
+              </Card>
+            ) : mode === 'actual' ? (
+              <Card>
+                <Input
+                  label="Amount the refiner paid"
+                  value={payoutText}
+                  onChangeText={setPayoutText}
+                  keyboardType="decimal-pad"
+                  prefix="$"
+                  placeholder="0.00"
+                  autoFocus
+                />
+                <Text style={styles.subNote}>
+                  Enter the net — what actually reached your account, after the refiner's own
+                  deductions. Fees you record elsewhere are kept for reference and are not
+                  subtracted again.
+                </Text>
+
+                <Divider />
+
+                <StatRow label="Lot cost" value={money(lot.costBasis, lot.currency)} />
+                <StatRow
+                  label="Profit on this lot"
+                  value={
+                    payoutText.trim()
+                      ? `${money(result.profit, lot.currency)} (${signedPercent(result.profitPercent)})`
+                      : '—'
+                  }
+                  emphasis
+                  tone={!payoutText.trim() ? 'muted' : result.profit >= 0 ? 'up' : 'down'}
+                />
+
+                <Divider />
+                <Button
+                  label="Record settlement"
+                  onPress={doSettle}
+                  loading={saving}
+                  disabled={!payoutText.trim()}
+                />
+                <Button label="Cancel" variant="ghost" onPress={cancelSettlement} />
               </Card>
             ) : (
               <>
-                {lines.map((line) => (
+                {(lines ?? []).map((line) => (
                   <Card key={line.id} style={{ marginBottom: spacing.md }}>
                     <View style={styles.lineHeader}>
                       <View style={[styles.dot, { backgroundColor: METALS[line.metal].color }]} />
@@ -345,6 +449,7 @@ export default function LotDetailScreen() {
 
                   <Divider />
                   <Button label="Record settlement" onPress={doSettle} loading={saving} />
+                  <Button label="Cancel" variant="ghost" onPress={cancelSettlement} />
                 </Card>
               </>
             )}
@@ -444,5 +549,6 @@ const styles = StyleSheet.create({
   itemPrice: { ...type.mono, fontSize: 14, color: colors.text },
 
   note: { ...type.caption, color: colors.textFaint, lineHeight: 16, marginTop: spacing.sm },
+  subNote: { ...type.caption, color: colors.textFaint, lineHeight: 16, marginTop: spacing.sm },
   warn: { ...type.caption, color: colors.warn, lineHeight: 16, padding: spacing.lg },
 });
