@@ -175,6 +175,12 @@ export default function CalculatorScreen() {
             {purity ? `${percent(purity.fineness, 2)} fine` : 'Select a purity'} ·{' '}
             {money(result.perGram, settings.currency)}/g · {money(result.perDwt, settings.currency)}/dwt
           </Text>
+          {/* A nominal fineness is a working average, not a measurement of the
+              piece on the scale. Quoting from it without saying so invites the
+              operator to treat a convention as an assay. */}
+          {purity?.nominal && !!purity.note && (
+            <Text style={styles.nominalNote}>{purity.note}</Text>
+          )}
         </View>
 
         {/* --------------------------------------------------------- weight */}
@@ -421,6 +427,7 @@ const styles = StyleSheet.create({
   metalName: { ...type.caption, color: colors.textMuted },
   metalSpot: { ...type.caption, fontSize: 10, color: colors.textFaint, fontVariant: ['tabular-nums'] },
 
+  nominalNote: { ...type.caption, color: colors.warn, lineHeight: 16, marginTop: spacing.sm },
   purityNote: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
 
   weightInput: { fontSize: 28, fontWeight: '700', paddingVertical: 10 },

@@ -7,6 +7,7 @@ import {
   starterRules,
   type BuyRule,
 } from '../src/lib/buyTable.ts';
+import { calculateMelt, findPurity } from '../src/lib/metals.ts';
 
 let counter = 0;
 const makeId = () => `r${++counter}`;
@@ -348,4 +349,106 @@ test('a legacy posted rule with no recorded currency is still honoured', () => {
   );
   assert.ok(!offer.currencyMismatch);
   assert.equal(offer.payout, 420);
+});
+
+/* ------------------------------------------------------------ filled stock */
+
+test('gold-filled is offered at 2% of the gross weight valued as pure gold', () => {
+  // The trade shorthand is "2% of gold value". Expressed as real content at a
+  // buy rate, so the record still states the metal actually in the piece:
+  // 2.5% fine × 80% = 2% of gross-as-pure, and it tracks spot the way the
+  // shorthand implies.
+  const spotPerTroyOz = 2300;
+  const grossGrams = 100;
+  const perGramPure = spotPerTroyOz / TROY_OUNCE_IN_GRAMS;
+
+  const purity = findPurity('au-filled')!;
+  const melt = calculateMelt({
+    spotPerTroyOz,
+    weight: grossGrams,
+    unit: 'g',
+    fineness: purity.fineness,
+    payoutRate: 1,
+    quantity: 1,
+  });
+
+  const offer = resolveOffer(
+    starterRules(makeId),
+    { metal: 'XAU', purityId: 'au-filled', weight: grossGrams, unit: 'g' },
+    melt.meltValue,
+    grossGrams,
+    0.8,
+    'USD',
+  );
+
+  const twoPercentOfGross = grossGrams * perGramPure * 0.02;
+  assert.ok(
+    Math.abs(offer.payout - twoPercentOfGross) < 0.01,
+    `expected ~${twoPercentOfGross.toFixed(2)}, got ${offer.payout.toFixed(2)}`,
+  );
+});
+
+test('the filled rate follows spot, since it is a share of metal value', () => {
+  const purity = findPurity('au-filled')!;
+  const at = (spotPerTroyOz: number) => {
+    const melt = calculateMelt({
+      spotPerTroyOz,
+      weight: 100,
+      unit: 'g',
+      fineness: purity.fineness,
+      payoutRate: 1,
+      quantity: 1,
+    });
+    return resolveOffer(
+      starterRules(makeId),
+      { metal: 'XAU', purityId: 'au-filled', weight: 100, unit: 'g' },
+      melt.meltValue,
+      100,
+      0.8,
+      'USD',
+    ).payout;
+  };
+  assert.ok(Math.abs(at(4600) - at(2300) * 2) < 0.01, 'double the spot, double the offer');
+});
+
+test('a filled rule does not capture ordinary karat scrap', () => {
+  // Rules are matched most-specific-first; a purity-scoped rule must not leak
+  // onto 14K, which would price a chain like plating.
+  const karat = resolveOffer(
+    starterRules(makeId),
+    { metal: 'XAU', purityId: 'au-14', weight: 100, unit: 'g' },
+    1000,
+    100,
+    0.8,
+    'USD',
+  );
+  assert.notEqual(karat.impliedRate, 0.8 * 0.025);
+  assert.ok(karat.impliedRate >= 0.72, 'a 100 g karat lot lands in the karat bands');
+});
+
+test('plated stock is valued at nothing, not at a fraction', () => {
+  // Paying anything for plating is a loss. Fineness zero makes that structural
+  // rather than a rule someone can delete.
+  const plated = findPurity('au-plated')!;
+  const melt = calculateMelt({
+    spotPerTroyOz: 2300,
+    weight: 100,
+    unit: 'g',
+    fineness: plated.fineness,
+    payoutRate: 1,
+    quantity: 1,
+  });
+  assert.equal(melt.meltValue, 0);
+  assert.equal(melt.pureGrams, 0);
+});
+
+test('filled and plated are marked nominal; karat gold is not', () => {
+  // The distinction drives the caution shown on screen.
+  assert.equal(findPurity('au-filled')!.nominal, true);
+  assert.equal(findPurity('ag-filled')!.nominal, true);
+  assert.equal(findPurity('au-plated')!.nominal, true);
+  assert.equal(findPurity('au-14')!.nominal, undefined);
+  for (const id of ['au-filled', 'ag-filled', 'au-plated']) {
+    assert.ok(findPurity(id)!.note, `${id} must explain itself`);
+  }
 });
