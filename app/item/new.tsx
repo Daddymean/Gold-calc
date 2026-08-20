@@ -272,6 +272,11 @@ export default function NewItemScreen() {
               sublabel: p.hint,
             }))}
           />
+          {/* Filled and plated stock carry a nominal figure, not an assay. The
+              record should not be written without the operator seeing that. */}
+          {purity?.nominal && !!purity.note && (
+            <Text style={styles.nominalNote}>{purity.note}</Text>
+          )}
         </View>
 
         {/* --------------------------------------------------- weight/count */}
@@ -489,6 +494,7 @@ const styles = StyleSheet.create({
 
   fieldLabel: { ...type.label, color: colors.textMuted, marginBottom: spacing.sm },
   hint: { ...type.caption, color: colors.textFaint, marginBottom: spacing.xs },
+  nominalNote: { ...type.caption, color: colors.warn, lineHeight: 16, marginTop: spacing.sm },
 
   metalRow: { flexDirection: 'row', gap: spacing.sm },
   metalTile: {

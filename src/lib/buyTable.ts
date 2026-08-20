@@ -286,5 +286,30 @@ export function starterRules(makeId: () => string): BuyRule[] {
   }
   rules.push({ id: makeId(), metal: 'XPT', purityId: null, minGrams: 0, maxGrams: null, rate: 0.7 });
   rules.push({ id: makeId(), metal: 'XPD', purityId: null, minGrams: 0, maxGrams: null, rate: 0.7 });
+
+  // Filled stock is priced against its own content, not the karat bands.
+  //
+  // The common trade rule is "2% of what it would be worth as pure gold". That
+  // is this rule: 2.5% content paid at 80% comes to exactly 2% of the gross
+  // weight valued at spot, and it keeps tracking the gold price the way the
+  // shorthand implies. Expressing it this way rather than hard-coding 2% means
+  // the record still states the metal actually in the piece, so a refining lot
+  // computes a sane expected content.
+  rules.push({
+    id: makeId(),
+    metal: 'XAU',
+    purityId: 'au-filled',
+    minGrams: 0,
+    maxGrams: null,
+    rate: 0.8,
+  });
+  rules.push({
+    id: makeId(),
+    metal: 'XAG',
+    purityId: 'ag-filled',
+    minGrams: 0,
+    maxGrams: null,
+    rate: 0.8,
+  });
   return rules;
 }

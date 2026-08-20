@@ -86,6 +86,15 @@ export interface Purity {
   fineness: number;
   /** Shown under the label — hallmark stamps a buyer actually sees. */
   hint?: string;
+  /**
+   * True when the fineness is a working convention rather than a property of
+   * the piece in front of you. Karat gold is what it is stamped; filled stock
+   * is a layer of gold over brass whose thickness varies by marking, so its
+   * figure is representative and the screen has to say so.
+   */
+  nominal?: boolean;
+  /** Shown when the purity is selected. Required reading for nominal entries. */
+  note?: string;
 }
 
 /**
@@ -107,12 +116,47 @@ export const PURITIES: Purity[] = [
   { id: 'au-22', metal: 'XAU', label: '22K', fineness: 22 / 24, hint: '917' },
   { id: 'au-24', metal: 'XAU', label: '24K', fineness: 0.9999, hint: '999' },
 
+  // Filled and plated stock. Not karat gold: a layer bonded to a base metal.
+  //
+  // "Gold-filled" is a legal minimum of 1/20 of the item's weight in karat
+  // gold, most often marked 1/20 12K — 5% of the weight at half fineness, so
+  // 2.5% pure. Other markings exist (1/10 14K is 5.8%), which is why this is
+  // nominal: weigh a mixed bin of it and this is the sane average, not a fact
+  // about any one piece.
+  {
+    id: 'au-filled',
+    metal: 'XAU',
+    label: 'Gold-filled',
+    fineness: 0.025,
+    hint: '1/20 12K · GF',
+    nominal: true,
+    note: 'Gold-filled is a bonded layer over brass, not karat gold. 2.5% is the usual content for 1/20 12K; other markings run higher or lower, so treat the figure as a working average for a mixed lot rather than an assay of the piece.',
+  },
+  {
+    id: 'au-plated',
+    metal: 'XAU',
+    label: 'Gold-plated',
+    fineness: 0,
+    hint: 'GP · HGE · GEP',
+    nominal: true,
+    note: 'Plating is microns thick and no refiner pays for it. Valued at nothing on purpose — if a piece is marked 1/20 or GF it is filled, not plated, and belongs under Gold-filled.',
+  },
+
   { id: 'ag-800', metal: 'XAG', label: '.800', fineness: 0.8, hint: 'Continental' },
   { id: 'ag-830', metal: 'XAG', label: '.830', fineness: 0.83, hint: 'Scandinavian' },
   { id: 'ag-900', metal: 'XAG', label: '.900', fineness: 0.9, hint: 'US coin' },
   { id: 'ag-925', metal: 'XAG', label: '.925', fineness: 0.925, hint: 'Sterling' },
   { id: 'ag-958', metal: 'XAG', label: '.958', fineness: 0.958, hint: 'Britannia' },
   { id: 'ag-999', metal: 'XAG', label: '.999', fineness: 0.999, hint: 'Fine' },
+  {
+    id: 'ag-filled',
+    metal: 'XAG',
+    label: 'Silver-filled',
+    fineness: 0.04625,
+    hint: '1/20 sterling',
+    nominal: true,
+    note: 'Silver-filled is a sterling layer over base metal — 1/20 of the weight at .925, so about 4.6% fine. Nominal, like gold-filled: markings vary and a mixed bin averages out.',
+  },
 
   { id: 'pt-585', metal: 'XPT', label: '.585', fineness: 0.585 },
   { id: 'pt-850', metal: 'XPT', label: '.850', fineness: 0.85 },
