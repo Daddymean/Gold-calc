@@ -2,6 +2,7 @@
 // does not resolve the bundler's '@/' alias. Type-only imports are erased.
 import { METALS, findPurity, toGrams } from './metals.ts';
 import { valueItem } from './portfolio.ts';
+import type { YearSummary } from './taxYear.ts';
 import type { CurrencyCode } from '@/lib/format';
 import type { Customer, InventoryItem, MetalSymbol } from '@/types';
 
@@ -163,6 +164,75 @@ export function customersCsv(
       customer.notes ?? '',
     ];
   });
+
+  return toCsv(headers, rows);
+}
+
+/**
+ * The year's realised profit and loss, one row per event.
+ *
+ * Written to be handed to whoever does the books: dates, references, what came
+ * in, what it cost, and the difference. Losses stay negative. Totals are on the
+ * last row so the file reconciles on its own without the reader trusting a
+ * figure from somewhere else.
+ */
+export function taxYearCsv(summary: YearSummary): string {
+  const headers = [
+    'Date',
+    'Type',
+    'Reference',
+    'Description',
+    'Proceeds',
+    'Cost',
+    'Profit',
+    'Currency',
+  ];
+
+  const rows: unknown[][] = summary.events
+    // Oldest first: a ledger reads forward, unlike a screen.
+    .slice()
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .map((event) => [
+      event.date.slice(0, 10),
+      event.kind === 'sale' ? 'Sale' : 'Refining',
+      event.reference,
+      event.description,
+      event.proceeds.toFixed(2),
+      event.cost.toFixed(2),
+      event.profit.toFixed(2),
+      event.currency,
+    ]);
+
+  rows.push([]);
+  rows.push([
+    `${summary.year} total`,
+    '',
+    '',
+    '',
+    summary.proceeds.toFixed(2),
+    summary.cost.toFixed(2),
+    summary.profit.toFixed(2),
+    '',
+  ]);
+
+  // Anything the report could not add is listed rather than dropped, so the
+  // file never quietly represents less than the year contained.
+  if (summary.excluded.length) {
+    rows.push([]);
+    rows.push(['Not included — recorded in another currency']);
+    for (const event of summary.excluded) {
+      rows.push([
+        event.date.slice(0, 10),
+        event.kind === 'sale' ? 'Sale' : 'Refining',
+        event.reference,
+        event.description,
+        event.proceeds.toFixed(2),
+        event.cost.toFixed(2),
+        event.profit.toFixed(2),
+        event.currency,
+      ]);
+    }
+  }
 
   return toCsv(headers, rows);
 }

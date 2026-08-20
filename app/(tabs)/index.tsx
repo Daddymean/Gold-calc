@@ -191,6 +191,16 @@ export default function PricesScreen() {
                 </Text>
               )}
 
+              {/* The dashboard shows the running total; the year is where it
+                  gets read for tax. Reachable from the figure it belongs to. */}
+              {summary.realisedGain !== 0 && (
+                <Button
+                  label="Profit &amp; loss by year"
+                  variant="ghost"
+                  onPress={() => router.push('/reports')}
+                />
+              )}
+
               {summary.realisedFromRefining !== 0 && summary.realisedFromSales !== 0 && (
                 <Text style={styles.note}>
                   Realised P&L is {money(summary.realisedFromSales, settings.currency, 0)} from
