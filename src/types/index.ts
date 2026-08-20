@@ -114,6 +114,12 @@ export interface MeltLot {
 
   assayLines: import('@/lib/refining').AssayLine[];
   fees: import('@/lib/refining').LotFees;
+  /**
+   * What the refiner actually paid, net, when the operator has the settlement
+   * in hand. Takes precedence over the assay arithmetic — see `refining.ts`.
+   * Undefined means not reported; zero means a lot that came back worthless.
+   */
+  actualPayout?: number;
 
   notes?: string;
   createdAt: string;

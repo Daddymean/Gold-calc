@@ -1,6 +1,6 @@
 import { calculateMelt, findPurity, type MetalSymbol, type WeightUnit } from './metals.ts';
 import { starterRules, type BuyRule } from './buyTable.ts';
-import type { Customer, InventoryItem, ItemStatus, TransactionType } from '@/types';
+import type { Customer, InventoryItem, ItemStatus, MeltLot, TransactionType } from '@/types';
 
 /**
  * Sample book for the hosted demo.
@@ -228,6 +228,7 @@ export interface DemoBook {
   customers: Customer[];
   items: InventoryItem[];
   buyRules: BuyRule[];
+  lots: MeltLot[];
 }
 
 /**
@@ -290,5 +291,39 @@ export function buildDemoBook(makeId: () => string): DemoBook {
     };
   });
 
-  return { customers, items, buyRules: starterRules(makeId) };
+  // Melted stock has to have somewhere to have gone. Without a lot behind it,
+  // the sample book shows a piece that left the shelf and simply vanished —
+  // and hides the half of the business where scrap actually turns into money.
+  // Settled from a reported payout, which is how most refiners report.
+  const melted = items.filter((item) => item.status === 'melted');
+  const costBasis = melted.reduce((sum, item) => sum + item.purchasePrice, 0);
+  const settledAt = iso(9);
+
+  const lots: MeltLot[] = melted.length
+    ? [
+        {
+          id: makeId(),
+          // Overwritten by the caller with a reference drawn from the real
+          // sequence, so the first lot a visitor builds does not collide with
+          // this one.
+          reference: '',
+          refinerName: 'Meridian Refining',
+          itemIds: melted.map((item) => item.id),
+          status: 'settled',
+          costBasis,
+          currency: 'USD',
+          assayLines: [],
+          fees: { refining: 0, assay: 0, shipping: 0, other: 0 },
+          // A believable scrap margin: paid roughly 82% of melt at the counter,
+          // and the refiner settled a little over cost.
+          actualPayout: Math.round(costBasis * 1.19 * 100) / 100,
+          notes: 'Settled on the refiner’s reported figure — no line-by-line assay supplied.',
+          createdAt: iso(24),
+          sentAt: iso(21),
+          settledAt,
+        },
+      ]
+    : [];
+
+  return { customers, items, buyRules: starterRules(makeId), lots };
 }

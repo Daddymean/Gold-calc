@@ -82,7 +82,7 @@ test('settlement nets fees off the gross and reconciles against cost', () => {
   const fees = { refining: 45, assay: 25, shipping: 18, other: 0 };
   const gross = calculateAssayLine(lines[0]).value;
 
-  const result = calculateSettlement(lines, fees, 3000);
+  const result = calculateSettlement({ assayLines: lines, fees, costBasis: 3000 });
 
   close(result.grossValue, gross, 1e-9);
   close(result.feesTotal, 88);
@@ -93,14 +93,14 @@ test('settlement nets fees off the gross and reconciles against cost', () => {
 
 test('a lot whose fees exceed its value reports a loss rather than zero', () => {
   // Hiding this would hide exactly the lot that should stop being sent.
-  const result = calculateSettlement([line({ grossGrams: 1 })], { ...NO_FEES, refining: 500 }, 30);
+  const result = calculateSettlement({ assayLines: [line({ grossGrams: 1 })], fees: { ...NO_FEES, refining: 500 }, costBasis: 30 });
   assert.ok(result.netSettlement < 0);
   assert.ok(result.profit < 0);
 });
 
 test('negative fees cannot inflate a settlement', () => {
-  const withNegative = calculateSettlement([line()], { ...NO_FEES, refining: -1000 }, 0);
-  const withNone = calculateSettlement([line()], NO_FEES, 0);
+  const withNegative = calculateSettlement({ assayLines: [line()], fees: { ...NO_FEES, refining: -1000 }, costBasis: 0 });
+  const withNone = calculateSettlement({ assayLines: [line()], fees: NO_FEES, costBasis: 0 });
   close(withNegative.netSettlement, withNone.netSettlement, 1e-9);
 });
 
@@ -109,7 +109,7 @@ test('settlement totals across several metals', () => {
     line({ id: 'a', metal: 'XAU', grossGrams: 60, assayFineness: 0.75, payableRate: 0.97, pricePerTroyOz: 2400 }),
     line({ id: 'b', metal: 'XAG', grossGrams: 2000, assayFineness: 0.925, payableRate: 0.9, pricePerTroyOz: 28 }),
   ];
-  const result = calculateSettlement(lines, NO_FEES, 0);
+  const result = calculateSettlement({ assayLines: lines, fees: NO_FEES, costBasis: 0 });
 
   close(result.pureGramsByMetal.XAU, 45);
   close(result.pureGramsByMetal.XAG, 1850);
@@ -123,7 +123,7 @@ test('settlement totals across several metals', () => {
 });
 
 test('an empty lot settles to nothing', () => {
-  const result = calculateSettlement([], NO_FEES, 0);
+  const result = calculateSettlement({ assayLines: [], fees: NO_FEES, costBasis: 0 });
   assert.equal(result.grossValue, 0);
   assert.equal(result.profit, 0);
   assert.equal(result.profitPercent, 0);
@@ -159,11 +159,11 @@ test('variance reports the assay coming in under the book', () => {
   const expectedGrams = expected.pureGramsByMetal.XAU;
 
   // Refiner assays 5% less pure gold than the stamps suggested.
-  const settlement = calculateSettlement(
-    [line({ grossGrams: expectedGrams * 0.95, assayFineness: 1 })],
-    NO_FEES,
-    0,
-  );
+  const settlement = calculateSettlement({
+    assayLines: [line({ grossGrams: expectedGrams * 0.95, assayFineness: 1 })],
+    fees: NO_FEES,
+    costBasis: 0,
+  });
 
   const variance = calculateVariance(expected, settlement);
   const gold = variance.find((v) => v.metal === 'XAU')!;
@@ -176,7 +176,7 @@ test('variance reports the assay coming in under the book', () => {
 
 test('variance covers metals present on either side only', () => {
   const expected = calculateExpectedContent(items);
-  const settlement = calculateSettlement([line({ metal: 'XAU', grossGrams: 50 })], NO_FEES, 0);
+  const settlement = calculateSettlement({ assayLines: [line({ metal: 'XAU', grossGrams: 50 })], fees: NO_FEES, costBasis: 0 });
   const metals = calculateVariance(expected, settlement).map((v) => v.metal);
 
   assert.deepEqual(metals.sort(), ['XAG', 'XAU'], 'silver was expected but not assayed');
@@ -185,7 +185,7 @@ test('variance covers metals present on either side only', () => {
 
 test('an unexpected metal in the assay still shows up', () => {
   const expected = calculateExpectedContent([items[0]]);
-  const settlement = calculateSettlement([line({ metal: 'XPT', grossGrams: 10 })], NO_FEES, 0);
+  const settlement = calculateSettlement({ assayLines: [line({ metal: 'XPT', grossGrams: 10 })], fees: NO_FEES, costBasis: 0 });
   const platinum = calculateVariance(expected, settlement).find((v) => v.metal === 'XPT')!;
 
   assert.equal(platinum.expectedPureGrams, 0);
@@ -204,7 +204,7 @@ test('only settled lots contribute to realised profit', () => {
     costBasis: 5000,
   });
 
-  const oneSettled = calculateSettlement(lot('settled').assayLines, NO_FEES, 5000).profit;
+  const oneSettled = calculateSettlement({ assayLines: lot('settled').assayLines, fees: NO_FEES, costBasis: 5000 }).profit;
 
   close(realisedFromLots([lot('settled')]), oneSettled, 1e-9);
   assert.equal(realisedFromLots([lot('open'), lot('sent')]), 0);
@@ -255,4 +255,91 @@ test('a lot can be excluded so it does not reserve against itself', () => {
 
 test('no lots reserve nothing', () => {
   assert.equal(activeLotItemIds([]).size, 0);
+});
+
+/* ------------------------------------------- settling from the cheque */
+
+test('a reported payout is the settlement, whatever the lines say', () => {
+  // The refiner sent money. That figure is a fact and the assay arithmetic is
+  // an estimate of it, so the fact wins.
+  const result = calculateSettlement({
+    assayLines: [line({ grossGrams: 100, pricePerTroyOz: 2000 })],
+    fees: NO_FEES,
+    costBasis: 3000,
+    actualPayout: 4182.6,
+  });
+
+  assert.equal(result.netSettlement, 4182.6);
+  assert.ok(Math.abs(result.profit - 1182.6) < 0.001);
+  assert.equal(result.source, 'actual');
+});
+
+test('fees are never taken off a reported payout', () => {
+  // The cheque already had the refiner's deductions removed. Subtracting the
+  // recorded fees again would charge the dealer twice for the same 2%.
+  const fees = { refining: 200, assay: 35, shipping: 40, other: 0 };
+  const result = calculateSettlement({
+    assayLines: [],
+    fees,
+    costBasis: 1000,
+    actualPayout: 1500,
+  });
+
+  assert.equal(result.netSettlement, 1500, 'not 1500 − 275');
+  assert.equal(result.profit, 500);
+  assert.equal(result.feesTotal, 275, 'still recorded');
+  assert.equal(result.feesDeducted, false, 'but not applied');
+});
+
+test('a payout of zero is a real answer, not a missing one', () => {
+  // A bad batch can come back worth nothing, and that loss has to show.
+  const nothing = calculateSettlement({
+    assayLines: [line({ grossGrams: 100 })],
+    fees: NO_FEES,
+    costBasis: 900,
+    actualPayout: 0,
+  });
+  assert.equal(nothing.source, 'actual');
+  assert.equal(nothing.netSettlement, 0);
+  assert.equal(nothing.profit, -900, 'the whole cost is a loss');
+
+  const notReported = calculateSettlement({
+    assayLines: [line({ grossGrams: 100 })],
+    fees: NO_FEES,
+    costBasis: 900,
+  });
+  assert.equal(notReported.source, 'assay', 'undefined still means "settle from the lines"');
+  assert.ok(notReported.netSettlement > 0);
+});
+
+test('a lot that came back short is reported as the loss it is', () => {
+  // The case the demo user described: a bad batch. Nothing floors this at zero.
+  const result = calculateSettlement({
+    assayLines: [],
+    fees: NO_FEES,
+    costBasis: 5000,
+    actualPayout: 4100,
+  });
+  assert.equal(result.profit, -900);
+  assert.ok(result.profitPercent < 0);
+});
+
+test('settling from the cheque still reconciles against the lot cost', () => {
+  const result = calculateSettlement({
+    assayLines: [],
+    fees: NO_FEES,
+    costBasis: 2000,
+    actualPayout: 2500,
+  });
+  assert.equal(result.costBasis, 2000);
+  assert.equal(result.profitPercent, 0.25);
+});
+
+test('realised profit counts reported payouts alongside assayed ones', () => {
+  const assayed = { status: 'settled' as const, assayLines: [line({ grossGrams: 50 })], fees: NO_FEES, costBasis: 100 };
+  const reported = { status: 'settled' as const, assayLines: [], fees: NO_FEES, costBasis: 1000, actualPayout: 1250 };
+
+  const total = realisedFromLots([assayed, reported]);
+  const assayedOnly = realisedFromLots([assayed]);
+  assert.ok(Math.abs(total - (assayedOnly + 250)) < 0.01);
 });

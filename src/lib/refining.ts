@@ -23,6 +23,19 @@ import {
  * expressible in the same shape by setting the payable rate to 1 and using the
  * per-gram figure as the price.
  *
+ * There are two ways to settle a lot, and both are legitimate:
+ *
+ *   - **From the assay.** Enter what the refiner reported and the arithmetic
+ *     produces the payout. This is the only way to see variance — whether the
+ *     assay matched the book, and whether this refiner is paying what they said.
+ *   - **From the cheque.** Type the amount that actually landed. Some refiners
+ *     send a figure and little else, and a dealer who has the money in hand
+ *     should not have to reverse-engineer a payable rate to record it.
+ *
+ * The second is the truth when it is available, so it wins. Its number is the
+ * *net* proceeds — what the refiner paid after their own deductions — so fees
+ * recorded alongside it are kept for the record and never subtracted again.
+ *
  * Pure and free of native imports, so the arithmetic that decides whether a
  * month was profitable can be tested on its own.
  */
@@ -92,12 +105,34 @@ export function calculateAssayLine(line: AssayLine): AssayLineResult {
 
 /* ------------------------------------------------------- the whole settlement */
 
+export interface SettlementInput {
+  assayLines: AssayLine[];
+  fees: LotFees;
+  costBasis: number;
+  /**
+   * The net amount the refiner actually paid, when the operator has the
+   * settlement in hand. Overrides the assay arithmetic entirely: it is a fact,
+   * and the lines are an estimate of it.
+   *
+   * Undefined means "not reported yet". Zero is a real answer — a lot can come
+   * back worthless — so it must not be conflated with absent.
+   */
+  actualPayout?: number;
+}
+
 export interface SettlementResult {
-  /** Value of the payable content before fees. */
+  /** Value of the payable content before fees, from the assay lines. */
   grossValue: number;
   feesTotal: number;
-  /** What the refiner actually pays. */
+  /** What the refiner actually paid. */
   netSettlement: number;
+  /** Where `netSettlement` came from — the cheque, or the arithmetic. */
+  source: 'actual' | 'assay';
+  /**
+   * False when `netSettlement` is a reported net that already had the refiner's
+   * deductions taken out. `feesTotal` is then a record, not a subtraction.
+   */
+  feesDeducted: boolean;
   /** What the items in the lot cost at the counter. */
   costBasis: number;
   /** netSettlement − costBasis. The number the whole business turns on. */
@@ -107,11 +142,8 @@ export interface SettlementResult {
   payableGramsByMetal: Record<MetalSymbol, number>;
 }
 
-export function calculateSettlement(
-  lines: AssayLine[],
-  fees: LotFees,
-  costBasis: number,
-): SettlementResult {
+export function calculateSettlement(input: SettlementInput): SettlementResult {
+  const { assayLines: lines, fees, costBasis, actualPayout } = input;
   const pureGramsByMetal = emptyByMetal();
   const payableGramsByMetal = emptyByMetal();
   let grossValue = 0;
@@ -130,9 +162,16 @@ export function calculateSettlement(
     Math.max(0, safe(fees.shipping)) +
     Math.max(0, safe(fees.other));
 
-  // Deliberately not floored at zero: fees can exceed the value of a small lot,
-  // and hiding that would hide exactly the lot you should stop sending.
-  const netSettlement = grossValue - feesTotal;
+  // A reported payout is the money that arrived, so it is already net of
+  // whatever the refiner took. Subtracting the recorded fees again would
+  // charge the dealer twice and turn a fair lot into a loss on paper.
+  const reported = actualPayout != null && Number.isFinite(actualPayout);
+  const netSettlement = reported
+    ? safe(actualPayout)
+    // Deliberately not floored at zero: fees can exceed the value of a small
+    // lot, and hiding that would hide exactly the lot you should stop sending.
+    : grossValue - feesTotal;
+
   const basis = Math.max(0, safe(costBasis));
   const profit = netSettlement - basis;
 
@@ -140,6 +179,8 @@ export function calculateSettlement(
     grossValue,
     feesTotal,
     netSettlement,
+    source: reported ? 'actual' : 'assay',
+    feesDeducted: !reported,
     costBasis: basis,
     profit,
     profitPercent: basis > 0 ? profit / basis : 0,
@@ -249,6 +290,7 @@ export interface SettledLotLike {
   assayLines: AssayLine[];
   fees: LotFees;
   costBasis: number;
+  actualPayout?: number;
 }
 
 /**
@@ -258,10 +300,7 @@ export interface SettledLotLike {
 export function realisedFromLots(lots: SettledLotLike[]): number {
   return lots
     .filter((lot) => lot.status === 'settled')
-    .reduce(
-      (sum, lot) => sum + calculateSettlement(lot.assayLines, lot.fees, lot.costBasis).profit,
-      0,
-    );
+    .reduce((sum, lot) => sum + calculateSettlement(lot).profit, 0);
 }
 
 /**

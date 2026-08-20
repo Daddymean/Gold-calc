@@ -83,7 +83,17 @@ interface AppStateValue {
   deleteLot: (id: string) => Promise<void>;
   /** Moves a lot to 'sent' and marks its items melted in one step. */
   sendLot: (id: string) => Promise<void>;
-  settleLot: (id: string, assayLines: AssayLine[], fees: LotFees) => Promise<void>;
+  /**
+   * `actualPayout` is the net the refiner reported paying, when the operator has
+   * the figure rather than a full statement. It takes precedence over the assay
+   * arithmetic; undefined means settle from the lines.
+   */
+  settleLot: (
+    id: string,
+    assayLines: AssayLine[],
+    fees: LotFees,
+    actualPayout?: number,
+  ) => Promise<void>;
 
   buyRules: BuyRule[];
   saveBuyRules: (rules: BuyRule[]) => Promise<void>;
@@ -192,10 +202,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         loadedItems = seeded.items;
         loadedCustomers = seeded.customers;
         loadedRules = seeded.buyRules;
+        // References come from the same counter the app uses, so a visitor's
+        // first lot is L-0002 rather than a second L-0001.
+        loadedLots = [];
+        for (const lot of seeded.lots) {
+          loadedLots.push({ ...lot, reference: await storage.nextLotReference() });
+        }
         await Promise.all([
           storage.saveItems(seeded.items),
           storage.saveCustomers(seeded.customers),
           storage.saveBuyRules(seeded.buyRules),
+          storage.saveLots(loadedLots),
         ]);
       }
 
@@ -530,11 +547,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   );
 
   const settleLot: AppStateValue['settleLot'] = useCallback(
-    async (id, assayLines, fees) => {
+    async (id, assayLines, fees, actualPayout) => {
       await persistLots(
         lots.map((lot) =>
           lot.id === id
-            ? { ...lot, status: 'settled', assayLines, fees, settledAt: new Date().toISOString() }
+            ? {
+                ...lot,
+                status: 'settled',
+                assayLines,
+                fees,
+                actualPayout,
+                settledAt: new Date().toISOString(),
+              }
             : lot,
         ),
       );

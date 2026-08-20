@@ -15,13 +15,13 @@ import { colors, radius, spacing, type } from '@/theme';
 export default function PricesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { settings, quotes, quotesUpdatedAt, refreshing, spotError, refreshQuotes, items, history, loadHistory } =
+  const { settings, quotes, quotesUpdatedAt, refreshing, spotError, refreshQuotes, items, lots, history, loadHistory } =
     useApp();
   const spot = useSpot();
 
   const summary = useMemo(
-    () => summarisePortfolio(items, spot, settings.currency),
-    [items, spot, settings.currency],
+    () => summarisePortfolio(items, spot, settings.currency, lots),
+    [items, spot, settings.currency, lots],
   );
   const present = metalsPresent(summary);
 
@@ -175,7 +175,8 @@ export default function PricesScreen() {
                 <Mini
                   label="Realised P&L"
                   value={
-                    summary.realisedGain === 0 && summary.offCurrencySold > 0
+                    summary.realisedGain === 0 &&
+                    (summary.offCurrencySold > 0 || summary.offCurrencyLots > 0)
                       ? '—'
                       : money(summary.realisedGain, settings.currency, 0)
                   }
@@ -187,6 +188,22 @@ export default function PricesScreen() {
                 <Text style={styles.warnNote}>
                   {summary.unpricedCount} item{summary.unpricedCount === 1 ? '' : 's'} could not be
                   valued — no live price for that metal.
+                </Text>
+              )}
+
+              {summary.realisedFromRefining !== 0 && summary.realisedFromSales !== 0 && (
+                <Text style={styles.note}>
+                  Realised P&L is {money(summary.realisedFromSales, settings.currency, 0)} from
+                  sales and {money(summary.realisedFromRefining, settings.currency, 0)} from settled
+                  melt lots.
+                </Text>
+              )}
+
+              {summary.offCurrencyLots > 0 && (
+                <Text style={styles.warnNote}>
+                  {summary.offCurrencyLots} settled lot
+                  {summary.offCurrencyLots === 1 ? ' was' : 's were'} priced in another currency and
+                  {summary.offCurrencyLots === 1 ? ' is' : ' are'} not in the realised total.
                 </Text>
               )}
 
@@ -306,6 +323,7 @@ const styles = StyleSheet.create({
   miniValue: { ...type.mono, fontSize: 18, color: colors.text, marginTop: 2 },
 
   warnNote: { ...type.caption, color: colors.warn, marginTop: spacing.md },
+  note: { ...type.caption, color: colors.textMuted, marginTop: spacing.md },
 
   emptyBook: { gap: spacing.lg },
   emptyBookText: { ...type.body, color: colors.textMuted, lineHeight: 21 },
