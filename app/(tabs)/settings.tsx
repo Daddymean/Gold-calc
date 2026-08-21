@@ -345,6 +345,12 @@ export default function SettingsScreen() {
           </Text>
           <View style={{ height: spacing.md }} />
           <Button
+            label="Profit &amp; loss by year"
+            variant="secondary"
+            onPress={() => router.push('/reports')}
+          />
+          <View style={{ height: spacing.sm }} />
+          <Button
             label={`Export inventory (${items.length})`}
             variant="secondary"
             loading={exporting}

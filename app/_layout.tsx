@@ -39,6 +39,7 @@ export default function RootLayout() {
               <Stack.Screen name="lots/index" options={{ title: 'Refining lots' }} />
               <Stack.Screen name="lots/new" options={{ title: 'Build a lot', presentation: 'modal' }} />
               <Stack.Screen name="lots/[id]" options={{ title: 'Lot' }} />
+              <Stack.Screen name="reports" options={{ title: 'Profit & loss' }} />
             </Stack>
           </AppGate>
         </AppStateProvider>
