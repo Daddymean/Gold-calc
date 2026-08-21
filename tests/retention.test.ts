@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { expiredIdPhotoOwners } from '../src/lib/retention.ts';
+import { expiredIdPhotoOwners, itemsUnderHold } from '../src/lib/retention.ts';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-08-08T12:00:00Z');
@@ -46,7 +46,6 @@ test('an empty book sweeps nothing', () => {
 
 /* ------------------------------------------------------------ hold period */
 
-import { itemsUnderHold } from '../src/lib/retention.ts';
 
 const stock = (id: string, daysAgo: number, status = 'in_stock') => ({
   id,

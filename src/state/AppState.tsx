@@ -7,13 +7,11 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState as RNAppState } from 'react-native';
-import { getProvider, type ProviderId } from '@/lib/spot';
-import { METAL_ORDER } from '@/lib/metals';
 import { DEFAULT_SETTINGS, VaultUnreadableError, storage, uid } from '@/lib/storage';
 import { resolveOffer, type RateQuery, type ResolvedOffer } from '@/lib/buyTable';
 import { deleteAllPhotos, deletePhoto } from '@/lib/photos';
 import { expiredIdPhotoOwners } from '@/lib/retention';
+import { METAL_ORDER } from '@/lib/metals';
 import {
   activeLotItemIds,
   calculateExpectedContent,
@@ -23,6 +21,8 @@ import {
 } from '@/lib/refining';
 import { buildDemoBook } from '@/lib/demo';
 import { IS_DEMO } from '@/lib/demoMode';
+import { useSpotFeed } from '@/state/useSpotFeed';
+import { useStoredCollection } from '@/state/useStoredCollection';
 import type {
   BuyRule,
   Customer,
@@ -36,10 +36,14 @@ import type {
 } from '@/types';
 
 /**
- * One provider holds inventory, customers, settings and spot prices. They are
- * genuinely coupled — logging an item stamps the live spot onto the record, and
- * the dashboard values inventory against the current quote — so splitting them
- * would just mean threading the same data through three contexts.
+ * The book: inventory, customers, lots, buy rules, settings — everything an
+ * operator writes. Live prices moved to `useSpotFeed`; they arrive on a timer
+ * from the network and share nothing with the book except the settings object.
+ *
+ * Each collection persists through `useStoredCollection`, which is where the
+ * two storage guarantees live: mutations apply to the current state rather
+ * than a render-stale copy, and writes are serialized so an older payload can
+ * never land after a newer one.
  */
 
 interface AppStateValue {
@@ -109,43 +113,45 @@ interface AppStateValue {
 
 const AppStateContext = createContext<AppStateValue | null>(null);
 
-const historyKey = (metal: MetalSymbol, range: HistoryRange, currency: string) =>
-  `${metal}:${range}:${currency}`;
-
-function indexQuotes(list: SpotQuote[]): Record<MetalSymbol, SpotQuote | undefined> {
-  const out: Record<MetalSymbol, SpotQuote | undefined> = {
-    XAU: undefined,
-    XAG: undefined,
-    XPT: undefined,
-    XPD: undefined,
-  };
-  for (const q of list) out[q.metal] = q;
-  return out;
-}
+// Module-level so the write queues behind each collection are created once.
+const saveItems = (value: InventoryItem[]) => storage.saveItems(value);
+const saveCustomers = (value: Customer[]) => storage.saveCustomers(value);
+const saveLots = (value: MeltLot[]) => storage.saveLots(value);
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [items, setItems] = useState<InventoryItem[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [quotes, setQuotes] = useState<Record<MetalSymbol, SpotQuote | undefined>>(
-    indexQuotes([]),
-  );
-  const [quotesUpdatedAt, setQuotesUpdatedAt] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [spotError, setSpotError] = useState<string | null>(null);
-  const [history, setHistory] = useState<Record<string, PriceHistory>>({});
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [buyRules, setBuyRules] = useState<BuyRule[]>([]);
-  const [lots, setLots] = useState<MeltLot[]>([]);
   const [vaultError, setVaultError] = useState<string | null>(null);
+
+  // Destructured because the hook returns a fresh wrapper object each render;
+  // the functions inside are the stable identities the callbacks below key on.
+  const {
+    state: items,
+    hydrate: hydrateItems,
+    read: readItems,
+    commit: commitItems,
+  } = useStoredCollection<InventoryItem>(saveItems);
+  const {
+    state: customers,
+    hydrate: hydrateCustomers,
+    read: readCustomers,
+    commit: commitCustomers,
+  } = useStoredCollection<Customer>(saveCustomers);
+  const {
+    state: lots,
+    hydrate: hydrateLots,
+    read: readLots,
+    commit: commitLots,
+  } = useStoredCollection<MeltLot>(saveLots);
 
   // Kept in a ref so the refresh timer and app-foreground handler always read
   // current settings without being torn down and rebuilt on every keystroke.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const lastFetchRef = useRef<number>(0);
-  const inFlightRef = useRef(false);
+
+  const spot = useSpotFeed(settings, settingsRef, ready);
+  const { invalidate: invalidateSpot, reset: resetSpot } = spot;
 
   /* ------------------------------------------------------------- bootstrap */
 
@@ -209,30 +215,20 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           loadedLots.push({ ...lot, reference: await storage.nextLotReference() });
         }
         await Promise.all([
-          storage.saveItems(seeded.items),
-          storage.saveCustomers(seeded.customers),
-          storage.saveBuyRules(seeded.buyRules),
+          storage.saveItems(loadedItems),
+          storage.saveCustomers(loadedCustomers),
+          storage.saveBuyRules(loadedRules),
           storage.saveLots(loadedLots),
         ]);
       }
 
       setSettings(loadedSettings);
       settingsRef.current = loadedSettings;
-      setItems(loadedItems);
-      setCustomers(loadedCustomers);
+      hydrateItems(loadedItems);
+      hydrateCustomers(loadedCustomers);
       setBuyRules(loadedRules);
-      setLots(loadedLots);
-      // Merge rather than replace: a screen can mount and fetch its own series
-      // before these reads resolve, and a plain assignment would throw that
-      // fresher data away. Anything already in state wins over the cache.
-      setHistory((prev) => ({ ...cachedHistory, ...prev }));
-
-      // Show the last known prices immediately; the network refresh replaces
-      // them a moment later. Stale numbers beat an empty ticker.
-      if (cachedQuotes.length) {
-        setQuotes(indexQuotes(cachedQuotes));
-        setQuotesUpdatedAt(cachedQuotes[0]?.fetchedAt ?? null);
-      }
+      hydrateLots(loadedLots);
+      spot.hydrate(cachedQuotes, cachedHistory);
       setReady(true);
 
       // Retention sweep: drop ID images that have outlived the window the
@@ -240,139 +236,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // filesystem never delays the first paint.
       const expired = expiredIdPhotoOwners(loadedCustomers, loadedSettings.idPhotoRetentionDays);
       if (expired.length) {
-        const swept = loadedCustomers.map((customer) =>
-          expired.includes(customer.id)
-            ? { ...customer, idPhotoUri: undefined, updatedAt: new Date().toISOString() }
-            : customer,
-        );
         await Promise.all(
           loadedCustomers
             .filter((c) => expired.includes(c.id) && c.idPhotoUri)
             .map((c) => deletePhoto(c.idPhotoUri!)),
         );
         if (cancelled) return;
-        setCustomers(swept);
-        await storage.saveCustomers(swept);
+        await commitCustomers((prev) =>
+          prev.map((customer) =>
+            expired.includes(customer.id)
+              ? { ...customer, idPhotoUri: undefined, updatedAt: new Date().toISOString() }
+              : customer,
+          ),
+        );
       }
     })();
     return () => {
       cancelled = true;
     };
+    // Bootstrap runs exactly once; everything it calls is identity-stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ----------------------------------------------------------- spot prices */
-
-  const refreshQuotes = useCallback(async (force = false) => {
-    if (inFlightRef.current) return;
-    const current = settingsRef.current;
-
-    if (!force) {
-      const staleAfter = Math.max(1, current.refreshMinutes) * 60_000;
-      if (Date.now() - lastFetchRef.current < staleAfter) return;
-    }
-
-    inFlightRef.current = true;
-    setRefreshing(true);
-    try {
-      const provider = getProvider(current.spotProvider as ProviderId);
-      if (provider.requiresKey && !current.spotApiKey) {
-        throw new Error(`${provider.label} needs an API key — add one in Settings.`);
-      }
-
-      const fetched = await provider.fetchQuotes(current.currency, current.spotApiKey);
-      const previous = await storage.loadQuotes();
-
-      // Providers that only return a spot price get their change column filled
-      // from the last price this device saw, so the ticker still tells a story.
-      const enriched = fetched.map((quote) => {
-        if (quote.change !== 0 || quote.previousClose !== quote.price) return quote;
-        const prior = previous.find((p) => p.metal === quote.metal && p.currency === quote.currency);
-        if (!prior || !prior.price) return quote;
-        const change = quote.price - prior.price;
-        return {
-          ...quote,
-          change,
-          changePercent: change / prior.price,
-          previousClose: prior.price,
-        };
-      });
-
-      setQuotes(indexQuotes(enriched));
-      setQuotesUpdatedAt(new Date().toISOString());
-      setSpotError(null);
-      lastFetchRef.current = Date.now();
-      await storage.saveQuotes(enriched);
-    } catch (err: any) {
-      // Never clear the cached quotes on failure — an offline counter still
-      // needs the last good numbers, clearly marked as stale.
-      setSpotError(err?.message ?? 'Could not reach the price feed');
-    } finally {
-      inFlightRef.current = false;
-      setRefreshing(false);
-    }
-  }, []);
-
-  // Initial fetch plus a poll on the configured interval.
-  useEffect(() => {
-    if (!ready) return;
-    refreshQuotes(true);
-    const ms = Math.max(1, settings.refreshMinutes) * 60_000;
-    const timer = setInterval(() => refreshQuotes(false), ms);
-    return () => clearInterval(timer);
-  }, [ready, settings.refreshMinutes, settings.currency, settings.spotProvider, settings.spotApiKey, refreshQuotes]);
-
-  // Prices go stale while the phone is in a pocket; catch up on foreground.
-  useEffect(() => {
-    const sub = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') refreshQuotes(false);
-    });
-    return () => sub.remove();
-  }, [refreshQuotes]);
-
-  /* --------------------------------------------------------------- history */
-
-  const loadHistory = useCallback(
-    async (metal: MetalSymbol, range: HistoryRange): Promise<PriceHistory | null> => {
-      const current = settingsRef.current;
-      const key = historyKey(metal, range, current.currency);
-      setHistoryLoading(true);
-      try {
-        const provider = getProvider(current.spotProvider as ProviderId);
-        const points = await provider.fetchHistory(metal, current.currency, range, current.spotApiKey);
-        const entry: PriceHistory = {
-          metal,
-          currency: current.currency,
-          range,
-          points,
-          fetchedAt: new Date().toISOString(),
-        };
-        setHistory((prev) => {
-          const next = { ...prev, [key]: entry };
-          storage.saveHistory(next);
-          return next;
-        });
-        return entry;
-      } catch {
-        // Fall back to whatever this range last held rather than blanking the chart.
-        return history[key] ?? null;
-      } finally {
-        setHistoryLoading(false);
-      }
-    },
-    [history],
-  );
-
-  /* ------------------------------------------------------------- mutations */
-
-  const persistItems = useCallback(async (next: InventoryItem[]) => {
-    setItems(next);
-    await storage.saveItems(next);
-  }, []);
-
-  const persistCustomers = useCallback(async (next: Customer[]) => {
-    setCustomers(next);
-    await storage.saveCustomers(next);
-  }, []);
+  /* ------------------------------------------------------------- inventory */
 
   const addItem: AppStateValue['addItem'] = useCallback(
     async (draft) => {
@@ -384,21 +270,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         createdAt: now,
         updatedAt: now,
       };
-      await persistItems([item, ...items]);
+      await commitItems((prev) => [item, ...prev]);
       return item;
     },
-    [items, persistItems],
+    [commitItems],
   );
 
   const updateItem: AppStateValue['updateItem'] = useCallback(
     async (id, patch) => {
-      await persistItems(
-        items.map((it) =>
+      await commitItems((prev) =>
+        prev.map((it) =>
           it.id === id ? { ...it, ...patch, updatedAt: new Date().toISOString() } : it,
         ),
       );
     },
-    [items, persistItems],
+    [commitItems],
   );
 
   // Deleting a record deletes its images too. This belongs here rather than in
@@ -406,28 +292,30 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // documents is a leak no second caller should be able to reintroduce.
   const deleteItem: AppStateValue['deleteItem'] = useCallback(
     async (id) => {
-      const doomed = items.find((it) => it.id === id);
-      await persistItems(items.filter((it) => it.id !== id));
+      const doomed = readItems().find((it) => it.id === id);
+      await commitItems((prev) => prev.filter((it) => it.id !== id));
       if (doomed) await Promise.all(doomed.photoUris.map(deletePhoto));
     },
-    [items, persistItems],
+    [readItems, commitItems],
   );
+
+  /* ------------------------------------------------------------- customers */
 
   const addCustomer: AppStateValue['addCustomer'] = useCallback(
     async (draft) => {
       const now = new Date().toISOString();
       const customer: Customer = { ...draft, id: uid(), createdAt: now, updatedAt: now };
-      await persistCustomers([customer, ...customers]);
+      await commitCustomers((prev) => [customer, ...prev]);
       return customer;
     },
-    [customers, persistCustomers],
+    [commitCustomers],
   );
 
   const updateCustomer: AppStateValue['updateCustomer'] = useCallback(
     async (id, patch) => {
-      const before = customers.find((c) => c.id === id);
-      await persistCustomers(
-        customers.map((c) =>
+      const before = readCustomers().find((c) => c.id === id);
+      await commitCustomers((prev) =>
+        prev.map((c) =>
           c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c,
         ),
       );
@@ -440,41 +328,36 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         await deletePhoto(before.idPhotoUri);
       }
     },
-    [customers, persistCustomers],
+    [readCustomers, commitCustomers],
   );
 
   const deleteCustomer: AppStateValue['deleteCustomer'] = useCallback(
     async (id) => {
-      const doomed = customers.find((c) => c.id === id);
-      await persistCustomers(customers.filter((c) => c.id !== id));
+      const doomed = readCustomers().find((c) => c.id === id);
+      await commitCustomers((prev) => prev.filter((c) => c.id !== id));
       // The ID photo is the most sensitive file the app writes. Retention only
       // sweeps images that have aged out; deleting the person's record has to
       // take theirs with it, or it stays in the sandbox with nothing in the UI
       // that can reach it.
       if (doomed?.idPhotoUri) await deletePhoto(doomed.idPhotoUri);
     },
-    [customers, persistCustomers],
+    [readCustomers, commitCustomers],
   );
 
   /* ------------------------------------------------------------ melt lots */
-
-  const persistLots = useCallback(async (next: MeltLot[]) => {
-    setLots(next);
-    await storage.saveLots(next);
-  }, []);
 
   const createLot: AppStateValue['createLot'] = useCallback(
     async (itemIds, refinerName) => {
       // An item must not sit in two unsettled lots: both could be sent and
       // settled, and the same purchase price would be counted against two
       // different refining results, inventing profit that never existed.
-      const reserved = activeLotItemIds(lots);
+      const reserved = activeLotItemIds(readLots());
       const free = itemIds.filter((itemId) => !reserved.has(itemId));
       if (!free.length) {
         throw new Error('Every item chosen is already in another open lot.');
       }
 
-      const chosen = items.filter((item) => free.includes(item.id));
+      const chosen = readItems().filter((item) => free.includes(item.id));
       const lot: MeltLot = {
         id: uid(),
         reference: await storage.nextLotReference(),
@@ -489,28 +372,30 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         fees: { ...NO_FEES },
         createdAt: new Date().toISOString(),
       };
-      await persistLots([lot, ...lots]);
+      await commitLots((prev) => [lot, ...prev]);
       return lot;
     },
-    [items, lots, persistLots],
+    [readItems, readLots, commitLots],
   );
 
   const updateLot: AppStateValue['updateLot'] = useCallback(
     async (id, patch) => {
-      await persistLots(lots.map((lot) => (lot.id === id ? { ...lot, ...patch } : lot)));
+      await commitLots((prev) =>
+        prev.map((lot) => (lot.id === id ? { ...lot, ...patch } : lot)),
+      );
     },
-    [lots, persistLots],
+    [commitLots],
   );
 
   const deleteLot: AppStateValue['deleteLot'] = useCallback(
     async (id) => {
-      const lot = lots.find((l) => l.id === id);
-      await persistLots(lots.filter((l) => l.id !== id));
+      const lot = readLots().find((l) => l.id === id);
+      await commitLots((prev) => prev.filter((l) => l.id !== id));
       // Deleting a lot that was already sent puts its items back on the shelf,
       // rather than leaving them marked melted with nothing to account for them.
       if (lot && lot.status !== 'open') {
-        await persistItems(
-          items.map((item) =>
+        await commitItems((prev) =>
+          prev.map((item) =>
             lot.itemIds.includes(item.id) && item.status === 'melted'
               ? { ...item, status: 'in_stock', updatedAt: new Date().toISOString() }
               : item,
@@ -518,38 +403,38 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         );
       }
     },
-    [lots, items, persistLots, persistItems],
+    [readLots, commitItems, commitLots],
   );
 
   const sendLot: AppStateValue['sendLot'] = useCallback(
     async (id) => {
-      const lot = lots.find((l) => l.id === id);
+      const lot = readLots().find((l) => l.id === id);
       if (!lot) return;
       const now = new Date().toISOString();
 
       // Recompute the basis at send time: the lot's contents can change while
       // it is still open, and this is the moment it stops being editable.
-      const chosen = items.filter((item) => lot.itemIds.includes(item.id));
-      await persistLots(
-        lots.map((l) =>
+      const chosen = readItems().filter((item) => lot.itemIds.includes(item.id));
+      await commitLots((prev) =>
+        prev.map((l) =>
           l.id === id
             ? { ...l, status: 'sent', sentAt: now, costBasis: calculateExpectedContent(chosen).costBasis }
             : l,
         ),
       );
-      await persistItems(
-        items.map((item) =>
+      await commitItems((prev) =>
+        prev.map((item) =>
           lot.itemIds.includes(item.id) ? { ...item, status: 'melted', updatedAt: now } : item,
         ),
       );
     },
-    [lots, items, persistLots, persistItems],
+    [readItems, readLots, commitItems, commitLots],
   );
 
   const settleLot: AppStateValue['settleLot'] = useCallback(
     async (id, assayLines, fees, actualPayout) => {
-      await persistLots(
-        lots.map((lot) =>
+      await commitLots((prev) =>
+        prev.map((lot) =>
           lot.id === id
             ? {
                 ...lot,
@@ -563,8 +448,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         ),
       );
     },
-    [lots, persistLots],
+    [commitLots],
   );
+
+  /* ----------------------------------------------------- rules & settings */
 
   const saveBuyRules: AppStateValue['saveBuyRules'] = useCallback(async (rules) => {
     setBuyRules(rules);
@@ -572,7 +459,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Reads settings directly rather than through the ref: a screen memoising on
-  // rateFor must recompute when the toggle or the default rate changes, and a
+  // offerFor must recompute when the toggle or the default rate changes, and a
   // ref read would leave it quoting the old number.
   const offerFor: AppStateValue['offerFor'] = useCallback(
     (query, meltValue, grossGrams) =>
@@ -597,12 +484,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       await storage.saveSettings(next);
       // Changing currency or provider invalidates every cached price.
       if (patch.currency || patch.spotProvider || patch.spotApiKey) {
-        lastFetchRef.current = 0;
-        setHistory({});
-        await storage.saveHistory({});
+        await invalidateSpot();
       }
     },
-    [],
+    [invalidateSpot],
   );
 
   const resetAll = useCallback(async () => {
@@ -612,15 +497,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     await storage.clearAll();
     setVaultError(null);
     setBuyRules([]);
-    setLots([]);
-    setItems([]);
-    setCustomers([]);
+    hydrateItems([]);
+    hydrateCustomers([]);
+    hydrateLots([]);
     setSettings(DEFAULT_SETTINGS);
     settingsRef.current = DEFAULT_SETTINGS;
-    setHistory({});
-    setQuotes(indexQuotes([]));
-    lastFetchRef.current = 0;
-  }, []);
+    resetSpot();
+  }, [hydrateItems, hydrateCustomers, hydrateLots, resetSpot]);
+
+  /* ----------------------------------------------------------------- value */
 
   const value = useMemo<AppStateValue>(
     () => ({
@@ -638,14 +523,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       updateCustomer,
       deleteCustomer,
       getCustomer: (id) => customers.find((c) => c.id === id),
-      quotes,
-      quotesUpdatedAt,
-      refreshing,
-      spotError,
-      refreshQuotes,
-      history,
-      loadHistory,
-      historyLoading,
+      quotes: spot.quotes,
+      quotesUpdatedAt: spot.quotesUpdatedAt,
+      refreshing: spot.refreshing,
+      spotError: spot.spotError,
+      refreshQuotes: spot.refreshQuotes,
+      history: spot.history,
+      loadHistory: spot.loadHistory,
+      historyLoading: spot.historyLoading,
       lots,
       getLot: (id) => lots.find((l) => l.id === id),
       createLot,
@@ -671,14 +556,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       addCustomer,
       updateCustomer,
       deleteCustomer,
-      quotes,
-      quotesUpdatedAt,
-      refreshing,
-      spotError,
-      refreshQuotes,
-      history,
-      loadHistory,
-      historyLoading,
+      spot.quotes,
+      spot.quotesUpdatedAt,
+      spot.refreshing,
+      spot.spotError,
+      spot.refreshQuotes,
+      spot.history,
+      spot.loadHistory,
+      spot.historyLoading,
       lots,
       createLot,
       updateLot,

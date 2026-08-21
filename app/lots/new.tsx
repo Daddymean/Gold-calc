@@ -9,7 +9,7 @@ import { itemsUnderHold } from '@/lib/retention';
 import { money, shortDate, weight as fmtWeight } from '@/lib/format';
 import { notify } from '@/lib/confirm';
 import { Badge, Button, Card, EmptyState, Input, SectionLabel, StatRow } from '@/components/ui';
-import { colors, radius, spacing, type } from '@/theme';
+import { colors, spacing, type } from '@/theme';
 
 /**
  * Build a refining lot.

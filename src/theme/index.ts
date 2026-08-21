@@ -1,3 +1,5 @@
+import type { TextStyle } from 'react-native';
+
 /**
  * Dark-first palette. Buyers work under bright counter lights and outdoors at
  * shows; a dark surface with one warm accent keeps the numbers the loudest
@@ -41,8 +43,6 @@ export const radius = {
   xl: 22,
   pill: 999,
 } as const;
-
-import type { TextStyle } from 'react-native';
 
 /**
  * Text styles are typed as TextStyle rather than `as const`: a const assertion

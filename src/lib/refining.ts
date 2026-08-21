@@ -5,6 +5,7 @@ import {
   calculateMelt,
   findPurity,
   METAL_ORDER,
+  zeroByMetal,
   type MetalSymbol,
   type WeightUnit,
 } from './metals.ts';
@@ -76,7 +77,6 @@ export interface LotItem {
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const safe = (n: number) => (Number.isFinite(n) ? n : 0);
-const emptyByMetal = (): Record<MetalSymbol, number> => ({ XAU: 0, XAG: 0, XPT: 0, XPD: 0 });
 
 /* ------------------------------------------------------------ one assay line */
 
@@ -144,8 +144,8 @@ export interface SettlementResult {
 
 export function calculateSettlement(input: SettlementInput): SettlementResult {
   const { assayLines: lines, fees, costBasis, actualPayout } = input;
-  const pureGramsByMetal = emptyByMetal();
-  const payableGramsByMetal = emptyByMetal();
+  const pureGramsByMetal = zeroByMetal();
+  const payableGramsByMetal = zeroByMetal();
   let grossValue = 0;
 
   for (const line of lines) {
@@ -203,7 +203,7 @@ export interface ExpectedContent {
  * — or a refiner shorting them.
  */
 export function calculateExpectedContent(items: LotItem[]): ExpectedContent {
-  const pureGramsByMetal = emptyByMetal();
+  const pureGramsByMetal = zeroByMetal();
   let costBasis = 0;
 
   for (const item of items) {

@@ -57,7 +57,7 @@ export default function NewItemScreen() {
     price?: string;
   }>();
 
-  const { settings, addItem, customers, addCustomer, quotes } = useApp();
+  const { settings, addItem, customers, addCustomer } = useApp();
   const spot = useSpot();
 
   // Prefilled when the operator arrives from the calculator, so the number they

@@ -169,6 +169,11 @@ export const PURITIES: Purity[] = [
   { id: 'pd-999', metal: 'XPD', label: '.999', fineness: 0.999, hint: 'Fine' },
 ];
 
+/** A fresh all-zero per-metal tally. Callers mutate their copy freely. */
+export function zeroByMetal(): Record<MetalSymbol, number> {
+  return { XAU: 0, XAG: 0, XPT: 0, XPD: 0 };
+}
+
 export function puritiesFor(metal: MetalSymbol): Purity[] {
   return PURITIES.filter((p) => p.metal === metal);
 }
@@ -293,7 +298,7 @@ export function calculateLot(
     meltValue: 0,
     payout: 0,
     margin: 0,
-    pureGramsByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
+    pureGramsByMetal: zeroByMetal(),
   };
 
   for (const line of lines) {

@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   findOverlaps,
+  resolveOffer,
   resolveRate,
+  ruleMode,
   rulesForMetal,
   starterRules,
   type BuyRule,
 } from '../src/lib/buyTable.ts';
+import { TROY_OUNCE_IN_GRAMS } from '../src/lib/metals.ts';
 import { calculateMelt, findPurity } from '../src/lib/metals.ts';
 
 let counter = 0;
@@ -190,8 +193,6 @@ test('every weight resolves against the starter table', () => {
 
 /* ------------------------------------------------------------- per-gram */
 
-import { resolveOffer, ruleMode } from '../src/lib/buyTable.ts';
-import { TROY_OUNCE_IN_GRAMS } from '../src/lib/metals.ts';
 
 const close = (actual: number, expected: number, tolerance = 1e-6) =>
   assert.ok(

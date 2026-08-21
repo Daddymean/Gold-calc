@@ -11,12 +11,12 @@ import {
   suggestAssayLines,
   type AssayLine,
 } from '@/lib/refining';
-import { money, parseNumber, percent, shortDate, signedPercent } from '@/lib/format';
+import { money, parseNumber, shortDate, signedPercent } from '@/lib/format';
 import { confirm } from '@/lib/confirm';
 import { itemsUnderHold } from '@/lib/retention';
 import { uid } from '@/lib/storage';
 import { Badge, Button, Card, Divider, Input, SectionLabel, StatRow } from '@/components/ui';
-import { colors, radius, spacing, type } from '@/theme';
+import { colors, spacing, type } from '@/theme';
 
 /** The settlement form's fields, exactly as typed. */
 interface LineDraft {
