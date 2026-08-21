@@ -8,7 +8,7 @@ import { METALS, findPurity } from '@/lib/metals';
 import { money, shortDate, weight as fmtWeight } from '@/lib/format';
 import { CustomerForm } from '@/components/CustomerForm';
 import { Badge, Button, Card, SectionLabel, StatRow } from '@/components/ui';
-import { colors, radius, spacing, type } from '@/theme';
+import { colors, spacing, type } from '@/theme';
 
 export default function CustomerDetailScreen() {
   const router = useRouter();

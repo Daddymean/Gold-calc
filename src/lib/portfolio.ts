@@ -1,7 +1,7 @@
 // Relative with an explicit extension: this module is exercised by the node
 // test runner, which does not resolve the bundler's '@/' alias. Type-only
 // imports are erased before Node sees them, so those may keep the alias.
-import { calculateMelt, findPurity, METAL_ORDER, type MetalSymbol } from './metals.ts';
+import { calculateMelt, findPurity, METAL_ORDER, zeroByMetal, type MetalSymbol } from './metals.ts';
 import { calculateSettlement, type LotFees, type AssayLine, type LotStatus } from './refining.ts';
 import type { CurrencyCode } from '@/lib/format';
 import type { InventoryItem } from '@/types';
@@ -158,8 +158,8 @@ export function summarisePortfolio(
     realisedFromSales: 0,
     realisedFromRefining: 0,
     offCurrencyLots: 0,
-    pureGramsByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
-    valueByMetal: { XAU: 0, XAG: 0, XPT: 0, XPD: 0 },
+    pureGramsByMetal: zeroByMetal(),
+    valueByMetal: zeroByMetal(),
     unpricedCount: 0,
     offCurrencyHeld: 0,
     offCurrencySold: 0,

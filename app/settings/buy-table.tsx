@@ -23,7 +23,7 @@ import {
 import { money, parseNumber, percent } from '@/lib/format';
 import { uid } from '@/lib/storage';
 import { Badge, Button, Card, Divider, Input, SectionLabel, Segmented } from '@/components/ui';
-import { colors, radius, spacing, type } from '@/theme';
+import { colors, spacing, type } from '@/theme';
 
 /**
  * The buy table editor.

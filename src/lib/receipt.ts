@@ -1,6 +1,6 @@
 // Relative imports with an explicit extension: this module is exercised by the
 // node test runner, which does not resolve the bundler's '@/' path alias.
-import { METALS, findPurity, toGrams } from './metals.ts';
+import { METALS, findPurity, toGrams, type WeightUnit } from './metals.ts';
 import { money, shortDate, type CurrencyCode } from './format.ts';
 
 /**
@@ -23,7 +23,7 @@ export interface ReceiptItem {
   metal: keyof typeof METALS;
   purityId: string;
   weight: number;
-  unit: string;
+  unit: WeightUnit;
   quantity: number;
   purchasePrice: number;
   currency: CurrencyCode;
@@ -112,7 +112,7 @@ export function buildReceiptHtml(
 ): string {
   const meta = METALS[item.metal];
   const purity = findPurity(item.purityId);
-  const grams = toGrams(item.weight, item.unit as never) * (item.quantity || 1);
+  const grams = toGrams(item.weight, item.unit) * (item.quantity || 1);
   const business = options.businessName?.trim() || 'Precious metals purchase';
   const declaration = options.declaration?.trim() || DEFAULT_DECLARATION;
 
