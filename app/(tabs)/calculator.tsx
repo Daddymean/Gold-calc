@@ -32,7 +32,7 @@ import { uid } from '@/lib/storage';
 export default function CalculatorScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { settings, offerFor } = useApp();
+  const { settings, offerFor, items } = useApp();
   const spot = useSpot();
 
   const [metal, setMetal] = useState<MetalSymbol>(settings.defaultMetal);
@@ -126,6 +126,24 @@ export default function CalculatorScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Shown only while the book is empty, which is as good a definition of
+            a first-time user as the app has. It disappears the moment they log
+            anything, so it never becomes furniture. */}
+        {items.length === 0 && (
+          <View style={styles.section}>
+            <Card>
+              <Text style={styles.primerTitle}>New to buying scrap?</Text>
+              <Text style={styles.primerBody}>
+                <Text style={styles.primerStep}>1.</Text> Pick the metal and its purity — the karat
+                stamp on the piece.{'\n'}
+                <Text style={styles.primerStep}>2.</Text> Weigh it and enter the weight.{'\n'}
+                <Text style={styles.primerStep}>3.</Text> The app works out what the metal inside is
+                worth at today's price. You pay a percentage of that; the rest is your margin.
+              </Text>
+            </Card>
+          </View>
+        )}
+
         {/* ---------------------------------------------------------- metal */}
         <View style={styles.section}>
           <SectionLabel>Metal</SectionLabel>
@@ -171,10 +189,19 @@ export default function CalculatorScreen() {
               sublabel: p.hint,
             }))}
           />
+          {/* "58.33% fine" is what the trade says; "pure gold by weight" is
+              what it means. Both, so the term is learned rather than decoded. */}
           <Text style={styles.purityNote}>
-            {purity ? `${percent(purity.fineness, 2)} fine` : 'Select a purity'} ·{' '}
-            {money(result.perGram, settings.currency)}/g · {money(result.perDwt, settings.currency)}/dwt
+            {purity
+              ? `${percent(purity.fineness, 2)} fine — that much pure ${METALS[metal].name.toLowerCase()} by weight`
+              : 'Select a purity'}
           </Text>
+          {!!purity && (
+            <Text style={styles.purityNote}>
+              Worth {money(result.perGram, settings.currency)} per gram ·{' '}
+              {money(result.perDwt, settings.currency)} per dwt (pennyweight)
+            </Text>
+          )}
           {/* A nominal fineness is a working average, not a measurement of the
               piece on the scale. Quoting from it without saying so invites the
               operator to treat a convention as an assay. */}
@@ -218,6 +245,7 @@ export default function CalculatorScreen() {
               }}
               keyboardType="number-pad"
               suffix="%"
+              hint="of melt value"
               accessibilityLabel="Percentage of melt paid out"
             />
             <Input
@@ -231,6 +259,7 @@ export default function CalculatorScreen() {
               keyboardType="decimal-pad"
               placeholder={result.payout > 0 ? result.payout.toFixed(2) : '0.00'}
               prefix="$"
+              hint="sets the rate for you"
               accessibilityLabel="Fixed offer amount"
             />
           </View>
@@ -258,10 +287,13 @@ export default function CalculatorScreen() {
             settings.useBuyTable && (
               <View>
                 <Text style={styles.offerNote}>
+                  {/* "Buy table · All · 0–31.1 g" told a newcomer nothing.
+                      Say which rule fired and that it came from their own
+                      posted rates. */}
                   {tableOffer.rule
-                    ? `Buy table · ${tableOffer.reason}${
+                    ? `From your buy table — the ${tableOffer.reason} rule${
                         tableOffer.mode === 'perGram'
-                          ? ` · ${money(tableOffer.perGram, settings.currency)}/g posted`
+                          ? `, posted at ${money(tableOffer.perGram, settings.currency)} per gram`
                           : ''
                       }`
                     : tableOffer.reason}
@@ -296,19 +328,29 @@ export default function CalculatorScreen() {
 
             <Divider />
 
+            {/* The trade's words, each with the plain one underneath. Somebody
+                buying their first lot should not have to know what "melt" or
+                "spot" means before the screen makes sense. */}
             <StatRow
               label="Melt value at spot"
               value={money(result.meltValue, settings.currency)}
+              detail="what the metal is worth"
               tone="gold"
             />
-            <StatRow label="Your margin" value={money(margin, settings.currency)} />
+            <StatRow
+              label="Your margin"
+              value={money(margin, settings.currency)}
+              detail="melt value less what you pay"
+            />
             <StatRow
               label="Pure content"
               value={`${fmtWeight(result.pureGrams, 3)} g · ${fmtWeight(result.pureTroyOz, 4)} ozt`}
+              detail="actual metal, once purity is taken off"
             />
             <StatRow
               label={`Spot (${METALS[metal].short})`}
               value={`${spotPrice ? spotMoney(spotPrice, settings.currency) : '—'}/ozt`}
+              detail="today's market price per troy ounce"
             />
 
             <View style={styles.actions}>
@@ -429,6 +471,9 @@ const styles = StyleSheet.create({
 
   nominalNote: { ...type.caption, color: colors.warn, lineHeight: 16, marginTop: spacing.sm },
   purityNote: { ...type.caption, color: colors.textMuted, marginTop: spacing.sm },
+  primerTitle: { ...type.heading, fontSize: 15, color: colors.text, marginBottom: spacing.sm },
+  primerBody: { ...type.caption, color: colors.textMuted, lineHeight: 19 },
+  primerStep: { color: colors.gold },
 
   weightInput: { fontSize: 28, fontWeight: '700', paddingVertical: 10 },
 

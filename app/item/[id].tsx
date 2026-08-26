@@ -6,7 +6,7 @@ import { printHtml, shareHtmlAsPdf } from '@/lib/print';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, useSpot } from '@/state/AppState';
-import { METALS, findPurity, toGrams } from '@/lib/metals';
+import { METALS, findPurity, ratePerWeight, toGrams } from '@/lib/metals';
 import { money, parseNumber, percent, shortDate, signedPercent, weight as fmtWeight } from '@/lib/format';
 import { valueItem } from '@/lib/portfolio';
 import { PhotoPicker } from '@/components/PhotoPicker';
@@ -50,6 +50,16 @@ export default function ItemDetailScreen() {
   // actual sale price once it has left the shop.
   const exitValue = item.status === 'sold' && item.salePrice != null ? item.salePrice : valuation.meltNow;
   const gainTone = valuation.gain >= 0 ? 'up' : 'down';
+
+  // Dealers quote each other in per-gram and per-ounce terms, so every money
+  // figure on the record carries its rate. Gross weight, because that is the
+  // weight the trade quotes on.
+  const grossGrams = toGrams(item.weight, item.unit) * (item.quantity || 1);
+  const rateLine = (amount: number, currency: typeof item.currency) => {
+    const rates = ratePerWeight(amount, grossGrams);
+    if (!rates.perGram) return undefined;
+    return `${money(rates.perGram, currency)}/g · ${money(rates.perTroyOz, currency, 0)}/ozt`;
+  };
 
   const heldDays = Math.floor((Date.now() - new Date(item.purchasedAt).getTime()) / 86_400_000);
   const holdRemaining = settings.holdPeriodDays - heldDays;
@@ -198,7 +208,22 @@ export default function ItemDetailScreen() {
 
       <View style={styles.section}>
         <Card>
-          <StatRow label="You paid" value={money(item.purchasePrice, item.currency)} />
+          <StatRow
+            label="You paid"
+            value={money(item.purchasePrice, item.currency)}
+            detail={rateLine(item.purchasePrice, item.currency)}
+          />
+          {/* The price of the metal on the day, sitting next to what was paid
+              rather than buried below the weights — it is the number that
+              explains the price, and a demo user looked straight past it
+              where it used to be. */}
+          {item.spotAtPurchase > 0 && (
+            <StatRow
+              label={`${meta.name} price that day`}
+              value={`${money(item.spotAtPurchase, item.currency)}/ozt`}
+              detail={shortDate(item.purchasedAt)}
+            />
+          )}
           <StatRow
             label={item.status === 'sold' ? 'Sold for' : 'Worth now'}
             // A sale price is money that was recorded, in the item's currency;
@@ -207,6 +232,11 @@ export default function ItemDetailScreen() {
               item.status === 'sold' && item.salePrice != null
                 ? money(item.salePrice, item.currency)
                 : money(valuation.meltNow, settings.currency)
+            }
+            detail={
+              item.status === 'sold' && item.salePrice != null
+                ? rateLine(item.salePrice, item.currency)
+                : rateLine(valuation.meltNow, settings.currency)
             }
             tone="gold"
           />
@@ -229,10 +259,6 @@ export default function ItemDetailScreen() {
 
           <StatRow label="Pure content" value={`${valuation.pureGrams.toFixed(3)} g`} />
           <StatRow label="Gross weight" value={`${toGrams(item.weight, item.unit).toFixed(2)} g`} />
-          <StatRow
-            label="Spot at purchase"
-            value={item.spotAtPurchase ? money(item.spotAtPurchase, item.currency) : '—'}
-          />
           <StatRow
             label="Paid vs melt then"
             value={
@@ -261,6 +287,9 @@ export default function ItemDetailScreen() {
               prefix="$"
               placeholder={exitValue > 0 ? exitValue.toFixed(2) : 'Sale price'}
               accessibilityLabel="Sale price"
+              // Shows the rate as it is typed, so the operator can sanity-check
+              // against what they quote per gram before committing the sale.
+              hint={rateLine(parseNumber(saleText), item.currency)}
             />
             <Button
               label="Mark sold"

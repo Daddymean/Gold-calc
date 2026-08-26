@@ -9,6 +9,7 @@ import {
   payoutRateForOffer,
   puritiesFor,
   toGrams,
+  ratePerWeight,
 } from '../src/lib/metals.ts';
 import { parseNumber } from '../src/lib/format.ts';
 
@@ -236,4 +237,27 @@ test('parseNumber reads grouping separators as grouping, not as decimals', () =>
   assert.equal(parseNumber('1.250,75'), 1250.75);
   assert.equal(parseNumber('12,5'), 12.5);
   assert.equal(parseNumber('12,55'), 12.55);
+});
+
+/* ------------------------------------------------- money per unit weight */
+
+test('a price paid converts to the per-gram rate the trade quotes', () => {
+  // "I paid $557 for that 18.4 g chain" — what a dealer says to another dealer
+  // is the per-gram figure, so the record should carry it without arithmetic.
+  const rates = ratePerWeight(556.8, 18.4);
+  assert.ok(Math.abs(rates.perGram - 30.26) < 0.01);
+  assert.ok(Math.abs(rates.perTroyOz - 30.26 * TROY_OUNCE_IN_GRAMS) < 0.05);
+  assert.ok(Math.abs(rates.perDwt - rates.perGram * 1.55517384) < 0.001);
+});
+
+test('one troy ounce of metal rates at its own price per ounce', () => {
+  const rates = ratePerWeight(2400, TROY_OUNCE_IN_GRAMS);
+  assert.ok(Math.abs(rates.perTroyOz - 2400) < 1e-6);
+});
+
+test('a weightless or nonsense record rates at zero rather than infinity', () => {
+  // Dividing by a zero weight would print "$Infinity/g" on a real record.
+  assert.deepEqual(ratePerWeight(500, 0), { perGram: 0, perDwt: 0, perTroyOz: 0 });
+  assert.deepEqual(ratePerWeight(500, -2), { perGram: 0, perDwt: 0, perTroyOz: 0 });
+  assert.equal(ratePerWeight(Number.NaN, 10).perGram, 0);
 });

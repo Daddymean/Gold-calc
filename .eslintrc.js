@@ -2,7 +2,10 @@
 module.exports = {
   root: true,
   extends: ['expo'],
-  ignorePatterns: ['dist/', 'node_modules/'],
+  // Build output and dependencies. 'dist*' covers the analysis builds too —
+  // linting a Metro bundle produces thousands of meaningless findings and
+  // buries the real ones.
+  ignorePatterns: ['dist*/', 'node_modules/', '.expo/', 'web-build/'],
   rules: {
     // Warned by default; a missed dependency is exactly the class of bug that
     // produced the blank price chart, so here it fails the build. The handful

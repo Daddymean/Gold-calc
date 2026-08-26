@@ -1,6 +1,6 @@
 // Relative imports with an explicit extension: this module is exercised by the
 // node test runner, which does not resolve the bundler's '@/' path alias.
-import { METALS, findPurity, toGrams, type WeightUnit } from './metals.ts';
+import { METALS, findPurity, ratePerWeight, toGrams, type WeightUnit } from './metals.ts';
 import { money, shortDate, type CurrencyCode } from './format.ts';
 
 /**
@@ -116,6 +116,7 @@ export function buildReceiptHtml(
   const business = options.businessName?.trim() || 'Precious metals purchase';
   const declaration = options.declaration?.trim() || DEFAULT_DECLARATION;
 
+  const rates = ratePerWeight(item.purchasePrice, grams);
   const isPurchase = item.transactionType === 'purchase';
   const title = isPurchase ? 'Purchase receipt' : `${item.transactionType} receipt`;
   const paidLabel = isPurchase ? 'Amount paid to you' : 'Amount';
@@ -150,6 +151,8 @@ export function buildReceiptHtml(
            display: flex; justify-content: space-between; align-items: baseline; }
   .total .label { font-size: 11pt; }
   .total .value { font-size: 20pt; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .total .rate { display: block; font-size: 9.5pt; font-weight: 400; color: #555;
+                 font-variant-numeric: tabular-nums; margin-top: 2px; }
   .declaration { margin-top: 26px; font-size: 10pt; line-height: 1.5; }
   .sign { margin-top: 26px; display: flex; gap: 26px; }
   .sign div { flex: 1; }
@@ -184,7 +187,16 @@ export function buildReceiptHtml(
 
   <div class="total">
     <span class="label">${escapeHtml(paidLabel)}</span>
-    <span class="value">${escapeHtml(money(item.purchasePrice, item.currency))}</span>
+    <span class="value">${escapeHtml(money(item.purchasePrice, item.currency))}
+      ${
+        // The rate is the figure a seller repeats to the next shop, and the one
+        // they use to check this deal against the last. Cheaper to print it
+        // than to have them work it out in the car park.
+        rates.perGram
+          ? `<span class="rate">${escapeHtml(money(rates.perGram, item.currency))} per gram · ${escapeHtml(money(rates.perTroyOz, item.currency, 0))} per troy ounce</span>`
+          : ''
+      }
+    </span>
   </div>
 
   <h2>Seller</h2>
