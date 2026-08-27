@@ -168,3 +168,27 @@ test('neither claim is made when there was no ID to verify', () => {
   assert.ok(!html.includes('verified at the time of sale'));
   assert.ok(!html.includes('as currently on file'));
 });
+
+/* ------------------------------------------------------------ unit rates */
+
+test('the receipt states what was paid per gram and per ounce', () => {
+  // The figure a seller repeats to the next shop, and uses to check this deal
+  // against the last. Printing it saves them working it out in the car park.
+  const html = buildReceiptHtml(item, seller);
+  assert.ok(html.includes('per gram'));
+  assert.ok(html.includes('per troy ounce'));
+  // 619.83 over 18.4 g.
+  assert.ok(html.includes('$33.69'), 'the per-gram rate');
+});
+
+test('the rate is computed on the whole lot, not one piece of it', () => {
+  const many = buildReceiptHtml({ ...item, quantity: 4 }, seller);
+  // Four times the weight for the same money is a quarter of the rate.
+  assert.ok(many.includes('$8.42'));
+});
+
+test('a weightless record prints no rate rather than a division by zero', () => {
+  const html = buildReceiptHtml({ ...item, weight: 0 }, seller);
+  assert.ok(!html.includes('per gram'));
+  assert.ok(html.includes('$619.83'), 'the amount paid still prints');
+});

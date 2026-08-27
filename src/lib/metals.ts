@@ -169,6 +169,35 @@ export const PURITIES: Purity[] = [
   { id: 'pd-999', metal: 'XPD', label: '.999', fineness: 0.999, hint: 'Fine' },
 ];
 
+export interface MoneyRates {
+  perGram: number;
+  perDwt: number;
+  perTroyOz: number;
+}
+
+/**
+ * What a sum of money works out to per unit of weight.
+ *
+ * Distinct from the per-unit figures `calculateMelt` returns: those say what
+ * the metal is *worth*, this says what was actually paid or received for it.
+ * The two are the same only on a deal done at exactly melt, which no dealer
+ * has ever made.
+ *
+ * Quoted on the gross weight, because that is the weight the trade quotes on
+ * — "thirty a gram for 14K" means the piece on the scale, not the gold in it.
+ */
+export function ratePerWeight(amount: number, grams: number): MoneyRates {
+  if (!Number.isFinite(amount) || !Number.isFinite(grams) || grams <= 0) {
+    return { perGram: 0, perDwt: 0, perTroyOz: 0 };
+  }
+  const perGram = amount / grams;
+  return {
+    perGram,
+    perDwt: perGram * WEIGHT_UNITS.dwt.grams,
+    perTroyOz: perGram * TROY_OUNCE_IN_GRAMS,
+  };
+}
+
 /** A fresh all-zero per-metal tally. Callers mutate their copy freely. */
 export function zeroByMetal(): Record<MetalSymbol, number> {
   return { XAU: 0, XAG: 0, XPT: 0, XPD: 0 };

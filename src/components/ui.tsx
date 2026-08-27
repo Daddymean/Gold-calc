@@ -240,11 +240,18 @@ export function Badge({
 export function StatRow({
   label,
   value,
+  detail,
   emphasis = false,
   tone,
 }: {
   label: string;
   value: string;
+  /**
+   * A quieter second line under the value — the same figure expressed another
+   * way, such as a total restated as a per-gram rate. Never new information,
+   * so a reader who ignores it loses nothing.
+   */
+  detail?: string;
   emphasis?: boolean;
   /** 'muted' is for a row that has no figure to give — say why, quietly. */
   tone?: 'up' | 'down' | 'gold' | 'muted';
@@ -262,9 +269,12 @@ export function StatRow({
   return (
     <View style={[s.statRow, emphasis && s.statRowEmphasis]}>
       <Text style={s.statLabel}>{label}</Text>
-      <Text style={[s.statValue, emphasis && s.statValueEmphasis, { color: valueColor }]}>
-        {value}
-      </Text>
+      <View style={s.statValueWrap}>
+        <Text style={[s.statValue, emphasis && s.statValueEmphasis, { color: valueColor }]}>
+          {value}
+        </Text>
+        {!!detail && <Text style={s.statDetail}>{detail}</Text>}
+      </View>
     </View>
   );
 }
@@ -345,6 +355,11 @@ const s = StyleSheet.create({
   },
   input: {
     flex: 1,
+    // Without this a web <input> keeps its intrinsic width (~170px) and refuses
+    // to shrink, so in a two-up row the field overflows its own rounded box and
+    // shoves the suffix outside it. That is how "Payout rate" came to read as a
+    // bare "72" with a stray % floating beside the next field.
+    minWidth: 0,
     color: colors.text,
     fontSize: 16,
     paddingVertical: 14,
@@ -392,7 +407,9 @@ const s = StyleSheet.create({
     marginTop: spacing.xs,
   },
   statLabel: { ...type.body, color: colors.textMuted },
-  statValue: { ...type.mono, color: colors.text },
+  statValueWrap: { alignItems: 'flex-end', flexShrink: 1 },
+  statValue: { ...type.mono, color: colors.text, textAlign: 'right' },
+  statDetail: { ...type.caption, fontSize: 11, color: colors.textFaint, marginTop: 1 },
   statValueEmphasis: { fontSize: 22, fontWeight: '700' },
 
   empty: { alignItems: 'center', paddingVertical: spacing.xxl, paddingHorizontal: spacing.xl, gap: spacing.sm },
