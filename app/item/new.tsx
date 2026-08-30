@@ -29,6 +29,7 @@ import { money, parseNumber, percent } from '@/lib/format';
 import { PhotoPicker } from '@/components/PhotoPicker';
 import { Badge, Button, Card, Divider, Input, SectionLabel, Segmented, StatRow } from '@/components/ui';
 import { colors, radius, spacing, type } from '@/theme';
+import { CoinPicker, type CoinPick } from '@/components/CoinPicker';
 import type { Customer, TransactionType } from '@/types';
 
 const TRANSACTION_TYPES: { value: TransactionType; label: string }[] = [
@@ -85,6 +86,8 @@ export default function NewItemScreen() {
   const [isNumismatic, setIsNumismatic] = useState(false);
   const [numismaticText, setNumismaticText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalogId, setCatalogId] = useState<string | undefined>();
 
   const purity = findPurity(purityId);
   const spotPrice = spot[metal] ?? 0;
@@ -112,6 +115,25 @@ export default function NewItemScreen() {
   const switchMetal = (next: MetalSymbol) => {
     setMetal(next);
     setPurityId(DEFAULT_PURITY[next]);
+    // The weight and purity came from the coin; changing the metal by hand
+    // means this is no longer that coin.
+    setCatalogId(undefined);
+  };
+
+  /**
+   * A catalog pick fills the intake form rather than taking a path around it.
+   * The description is only written when the operator has not typed one, so a
+   * note like "tube of 20, sealed" is never overwritten by the coin's name.
+   */
+  const applyCoin = ({ coin, entry }: CoinPick) => {
+    setMetal(coin.metal);
+    setPurityId(coin.purityId);
+    setUnit('g');
+    setWeightText(String(entry.grams));
+    setQuantityText(String(entry.quantity));
+    setCatalogId(coin.id);
+    setDescription((current) => current.trim() || entry.description);
+    setCatalogOpen(false);
   };
 
   const pickCustomer = (customer: Customer) => {
@@ -169,6 +191,7 @@ export default function NewItemScreen() {
         description: description.trim(),
         metal,
         purityId,
+        catalogId,
         weight: parseNumber(weightText),
         unit,
         quantity,
@@ -223,6 +246,14 @@ export default function NewItemScreen() {
         {/* ------------------------------------------------------ the item */}
         <View style={styles.section}>
           <SectionLabel>The item</SectionLabel>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Look up a coin"
+            onPress={() => setCatalogOpen(true)}
+            style={styles.catalogLink}
+          >
+            <Text style={styles.catalogLinkText}>Coins and junk silver — look it up</Text>
+          </Pressable>
           <Input
             label="Description"
             value={description}
@@ -483,6 +514,14 @@ export default function NewItemScreen() {
         <Button label="Cancel" variant="ghost" onPress={() => router.back()} style={{ flex: 1 }} />
         <Button label="Save item" onPress={save} loading={saving} style={{ flex: 2 }} />
       </View>
+
+      <CoinPicker
+        visible={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        onPick={applyCoin}
+        spot={spot}
+        currency={settings.currency}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -495,6 +534,8 @@ const styles = StyleSheet.create({
   fieldLabel: { ...type.label, color: colors.textMuted, marginBottom: spacing.sm },
   hint: { ...type.caption, color: colors.textFaint, marginBottom: spacing.xs },
   nominalNote: { ...type.caption, color: colors.warn, lineHeight: 16, marginTop: spacing.sm },
+  catalogLink: { alignSelf: 'flex-start', paddingVertical: spacing.xs, marginBottom: spacing.sm },
+  catalogLinkText: { ...type.body, color: colors.gold, fontWeight: '600' },
 
   metalRow: { flexDirection: 'row', gap: spacing.sm },
   metalTile: {
