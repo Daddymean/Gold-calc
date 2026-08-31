@@ -71,11 +71,26 @@ export function relativeTime(iso: string | null): string {
 /**
  * Parses what people actually type: "12.5", "12,5", "$1,250.75", " 12 ".
  *
- * Separators are genuinely ambiguous across locales, so the rules are explicit:
- * when both `.` and `,` appear the last one is the decimal mark and the other
- * is grouping; a lone separator followed by exactly three digits is grouping
- * ("1,250" is twelve hundred and fifty, not 1.25); anything else is a decimal
- * mark, so a European "12,5" still reads as 12.5.
+ * Separators are ambiguous across locales, so the rules are explicit, in order:
+ *
+ *  1. Both marks present — the last one is the decimal, the other is grouping.
+ *     "1,250.75" and "1.250,75" are both 1250.75.
+ *  2. The same mark twice or more — grouping, because no number has two
+ *     decimal points. "1.250.000" is a million and a quarter.
+ *  3. A lone comma with exactly three digits after it — grouping. "1,250" is
+ *     twelve hundred and fifty, not 1.25.
+ *  4. Anything else is a decimal mark, so "12,5" reads as 12.5.
+ *
+ * Rule 3 deliberately does not apply to a lone dot, and that asymmetry is the
+ * whole point. This app writes money as "$1,250.75", so the dot it shows the
+ * operator is a decimal point and the dot they type back is one too. Treating
+ * "31.103" as grouping — which is what a symmetric rule does — turns a Silver
+ * Eagle into 31 kilos of silver and a 0.715 factor into 715. Scales read to
+ * three decimals, so that shape is the common case, not the corner one.
+ *
+ * The cost is that a European typing "1.250" for 1250 gets 1.25. They are
+ * typing a grouping separator into a numeric field by hand, which is rare, and
+ * the melt value in front of them will be off by a thousand.
  */
 export function parseNumber(input: string): number {
   if (!input) return 0;
@@ -102,7 +117,9 @@ export function parseNumber(input: string): number {
     const at = Math.max(lastDot, lastComma);
     const tail = digitsOnly.slice(at + 1);
     const head = digitsOnly.slice(0, at);
-    const isGrouping = tail.length === 3 && head.length > 0 && !tail.includes(mark);
+    const repeated = head.includes(mark);
+    const isGrouping =
+      repeated || (mark === ',' && tail.length === 3 && head.length > 0);
     normalized = isGrouping
       ? digitsOnly.split(mark).join('')
       : `${head.split(mark).join('')}.${tail.split(mark).join('')}`;

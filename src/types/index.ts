@@ -45,6 +45,13 @@ export interface InventoryItem {
   weight: number;
   unit: WeightUnit;
   quantity: number;
+  /**
+   * The catalog coin this record was created from, when it was. Optional and
+   * never required to read the record — weight, purity and metal are already
+   * on it — but it lets a future screen answer "how many Eagles do I hold"
+   * without matching on description text.
+   */
+  catalogId?: string;
 
   purchasePrice: number;
   currency: CurrencyCode;

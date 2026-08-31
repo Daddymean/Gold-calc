@@ -22,6 +22,7 @@ import { money, parseNumber, percent, spotMoney, weight as fmtWeight } from '@/l
 import { Badge, Button, Card, Divider, Input, SectionLabel, Segmented, StatRow } from '@/components/ui';
 import { colors, radius, spacing, type } from '@/theme';
 import { uid } from '@/lib/storage';
+import { CoinPicker, type CoinPick } from '@/components/CoinPicker';
 
 /**
  * The calculator is the screen a buyer keeps open all day, so it optimises for
@@ -43,9 +44,21 @@ export default function CalculatorScreen() {
   const [offerText, setOfferText] = useState('');
   const [offerLocked, setOfferLocked] = useState(false);
   const [lot, setLot] = useState<LotLine[]>([]);
+  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const purity = findPurity(purityId);
   const spotPrice = spot[metal] ?? 0;
+
+  // The catalog fills the same three fields the operator would have typed, in
+  // grams because that is what every coin is specified in. Nothing downstream
+  // needs to know a coin was involved.
+  const applyCoin = ({ coin, entry }: CoinPick) => {
+    setMetal(coin.metal);
+    setPurityId(coin.purityId);
+    setUnit('g');
+    setWeightText((entry.grams * entry.quantity).toFixed(2));
+    setCatalogOpen(false);
+  };
 
   // Melt first, because a per-gram rule needs the gross weight and a percentage
   // rule needs the melt value; the table then decides which basis applies.
@@ -229,6 +242,16 @@ export default function CalculatorScreen() {
             onChange={setUnit}
             options={WEIGHT_UNIT_ORDER.map((u) => ({ value: u, label: WEIGHT_UNITS[u].label }))}
           />
+          {/* Coins are the one case where the weight is already known and
+              typing it is just recall from memory. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Look up a coin"
+            onPress={() => setCatalogOpen(true)}
+            style={styles.catalogLink}
+          >
+            <Text style={styles.catalogLinkText}>Coins and junk silver — look it up</Text>
+          </Pressable>
         </View>
 
         {/* ---------------------------------------------------------- offer */}
@@ -446,6 +469,14 @@ export default function CalculatorScreen() {
           </View>
         )}
       </ScrollView>
+
+      <CoinPicker
+        visible={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        onPick={applyCoin}
+        spot={spot}
+        currency={settings.currency}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -482,6 +513,8 @@ const styles = StyleSheet.create({
   staleRow: { gap: spacing.xs, marginTop: spacing.sm },
   staleText: { ...type.caption, color: colors.warn, lineHeight: 16 },
   link: { color: colors.gold, fontWeight: '700' },
+  catalogLink: { marginTop: spacing.md, alignSelf: 'flex-start' },
+  catalogLinkText: { ...type.body, color: colors.gold, fontWeight: '600' },
 
   resultCard: { marginTop: spacing.lg },
   noPrice: { gap: spacing.xs, marginBottom: spacing.md },

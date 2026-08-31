@@ -237,6 +237,19 @@ test('parseNumber reads grouping separators as grouping, not as decimals', () =>
   assert.equal(parseNumber('1.250,75'), 1250.75);
   assert.equal(parseNumber('12,5'), 12.5);
   assert.equal(parseNumber('12,55'), 12.55);
+  // Repeating a mark can only be grouping — nothing has two decimal points.
+  assert.equal(parseNumber('1.250.000'), 1250000);
+});
+
+test('a three-decimal weight is a weight, not a thousands separator', () => {
+  // The bug this pins read "31.103" as 31,103 — so a Silver Eagle weighed 31
+  // kilos and ten of them melted to $288,230 instead of $288. Three decimals
+  // is what a jeweller's scale reads and what every coin is specified to, so
+  // this shape is the common case rather than an edge one.
+  assert.equal(parseNumber('31.103'), 31.103);
+  assert.equal(parseNumber('12.345'), 12.345);
+  assert.equal(parseNumber('0.715'), 0.715);
+  assert.equal(parseNumber('2.500'), 2.5);
 });
 
 /* ------------------------------------------------- money per unit weight */

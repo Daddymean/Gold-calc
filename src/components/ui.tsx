@@ -172,6 +172,35 @@ export function Segmented<T extends string>({
   scroll?: boolean;
   accent?: string;
 }) {
+  const scroller = React.useRef<ScrollView>(null);
+  const offsets = React.useRef<Record<string, number>>({});
+  const scrolledFor = React.useRef<string | null>(null);
+
+  /**
+   * A long option row can hold the selected chip past the right edge — the
+   * karat table does, and so does silver once coin finenesses are in it. When
+   * the value changes from anywhere but a tap (a coin picked from the catalog,
+   * a metal switch resetting the purity) the operator has to see what got
+   * selected, so bring it into view.
+   *
+   * Two entry points because the ordering is not guaranteed: on a value change
+   * the chip may already be measured, but when the whole option set is
+   * replaced the measurements arrive after this render. Whichever happens
+   * second does the scroll, and the guard means it happens once.
+   */
+  const revealSelected = React.useCallback(() => {
+    if (!scroll || scrolledFor.current === value) return;
+    const x = offsets.current[value];
+    if (x == null) return;
+    scrolledFor.current = value;
+    scroller.current?.scrollTo({ x: Math.max(0, x - 32), animated: true });
+  }, [scroll, value]);
+
+  React.useEffect(() => {
+    scrolledFor.current = null;
+    revealSelected();
+  }, [value, revealSelected]);
+
   const chips = options.map((opt) => {
     const selected = opt.value === value;
     return (
@@ -180,6 +209,10 @@ export function Segmented<T extends string>({
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onPress={() => onChange(opt.value)}
+        onLayout={(e) => {
+          offsets.current[opt.value] = e.nativeEvent.layout.x;
+          if (opt.value === value) revealSelected();
+        }}
         style={[
           s.chip,
           scroll && s.chipScroll,
@@ -197,6 +230,7 @@ export function Segmented<T extends string>({
   if (scroll) {
     return (
       <ScrollView
+        ref={scroller}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.chipRowScroll}

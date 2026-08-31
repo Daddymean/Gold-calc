@@ -116,6 +116,12 @@ export const PURITIES: Purity[] = [
   { id: 'au-22', metal: 'XAU', label: '22K', fineness: 22 / 24, hint: '917' },
   { id: 'au-24', metal: 'XAU', label: '24K', fineness: 0.9999, hint: '999' },
 
+  // Coin gold. .900 is what most pre-1933 circulating gold was struck at —
+  // Double Eagles, 50 Pesos, 20 Francs — and .9167 doubles as both 22K and the
+  // Sovereign/Krugerrand standard. Listed here because a coin and a scrap chain
+  // go through the same melt engine.
+  { id: 'au-900', metal: 'XAU', label: '.900', fineness: 0.9, hint: 'Coin gold' },
+
   // Filled and plated stock. Not karat gold: a layer bonded to a base metal.
   //
   // "Gold-filled" is a legal minimum of 1/20 of the item's weight in karat
@@ -142,6 +148,8 @@ export const PURITIES: Purity[] = [
     note: 'Plating is microns thick and no refiner pays for it. Valued at nothing on purpose — if a piece is marked 1/20 or GF it is filled, not plated, and belongs under Gold-filled.',
   },
 
+  { id: 'ag-350', metal: 'XAG', label: '.350', fineness: 0.35, hint: 'US war nickel' },
+  { id: 'ag-400', metal: 'XAG', label: '.400', fineness: 0.4, hint: 'US 40% half' },
   { id: 'ag-800', metal: 'XAG', label: '.800', fineness: 0.8, hint: 'Continental' },
   { id: 'ag-830', metal: 'XAG', label: '.830', fineness: 0.83, hint: 'Scandinavian' },
   { id: 'ag-900', metal: 'XAG', label: '.900', fineness: 0.9, hint: 'US coin' },
